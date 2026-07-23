@@ -1,0 +1,111 @@
+{
+  "mybatis mapper": {
+    "prefix": "mapper",
+    "body": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+      "<!DOCTYPE mapper PUBLIC \"-//mybatis.org//DTD Mapper 3.0//EN\" \"https://mybatis.org/dtd/mybatis-3-mapper.dtd\">",
+      "<mapper namespace=\"$1\">",
+      "",
+      "\t$0",
+      "",
+      "</mapper>"
+    ],
+    "description": "Create a MyBatis XML mapper skeleton"
+  },
+  "mybatis resultMap": {
+    "prefix": "resultMap",
+    "body": [
+      "<resultMap id=\"$1\" type=\"$2\">",
+      "\t<id column=\"$3\" property=\"$4\"/>",
+      "\t<result column=\"$5\" property=\"$6\"/>",
+      "</resultMap>"
+    ],
+    "description": "Create a resultMap element"
+  },
+  "mybatis select": {
+    "prefix": "select",
+    "body": [
+      "<select id=\"$1\" resultType=\"$2\">",
+      "\t$0",
+      "</select>"
+    ],
+    "description": "Create a select statement"
+  },
+  "mybatis insert": {
+    "prefix": "insert",
+    "body": [
+      "<insert id=\"$1\" parameterType=\"$2\">",
+      "\t$0",
+      "</insert>"
+    ],
+    "description": "Create an insert statement"
+  },
+  "mybatis update": {
+    "prefix": "update",
+    "body": [
+      "<update id=\"$1\" parameterType=\"$2\">",
+      "\t$0",
+      "</update>"
+    ],
+    "description": "Create an update statement"
+  },
+  "mybatis delete": {
+    "prefix": "delete",
+    "body": [
+      "<delete id=\"$1\" parameterType=\"$2\">",
+      "\t$0",
+      "</delete>"
+    ],
+    "description": "Create a delete statement"
+  },
+  "mybatis sql fragment": {
+    "prefix": "sql",
+    "body": [
+      "<sql id=\"$1\">",
+      "\t$0",
+      "</sql>"
+    ],
+    "description": "Create a reusable sql fragment"
+  },
+  "mybatis include": {
+    "prefix": "include",
+    "body": [
+      "<include refid=\"$1\"/>"
+    ],
+    "description": "Include a sql fragment"
+  },
+  "mybatis if": {
+    "prefix": "if",
+    "body": [
+      "<if test=\"$1\">",
+      "\t$0",
+      "</if>"
+    ],
+    "description": "Create an if branch"
+  },
+  "mybatis where": {
+    "prefix": "where",
+    "body": [
+      "<where>",
+      "\t$0",
+      "</where>"
+    ],
+    "description": "Create a where wrapper"
+  },
+  "mybatis foreach": {
+    "prefix": "foreach",
+    "body": [
+      "<foreach collection=\"$1\" item=\"$2\" separator=\",\" open=\"(\" close=\")\">",
+      "\t#{$2}",
+      "</foreach>"
+    ],
+    "description": "Create a foreach loop"
+  },
+  "mybatis CDATA": {
+    "prefix": "CD",
+    "body": [
+      "<![CDATA[$1]]>"
+    ],
+    "description": "Create a CDATA section"
+  }
+}

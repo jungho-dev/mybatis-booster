@@ -1,0 +1,200 @@
+{
+  "name": "mybatis-booster",
+  "displayName": "Mybatis Booster",
+  "description": "A MyBatis Mapper Helper for VSCode",
+  "publisher": "JUNGHO",
+  "icon": "logo.webp",
+  "license": "Apache-2.0",
+  "main": "./out/extension.js",
+  "version": "1.0.1",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "mybatis",
+    "mapper",
+    "sql",
+    "java",
+    "xml",
+    "log"
+  ],
+  "activationEvents": [
+    "onLanguage:java",
+    "onLanguage:xml",
+    "onLanguage:sql"
+  ],
+  "contributes": {
+    "outputChannels": [
+      "Mybatis"
+    ],
+    "snippets": [
+      {
+        "language": "xml",
+        "path": "./snippets/mybatis.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "Mybatis.gotoxml",
+        "title": "Go to XML Mapper",
+        "category": "Mybatis",
+        "icon": "$(references)"
+      },
+      {
+        "command": "Mybatis.gotojava",
+        "title": "Go to Java Mapper",
+        "category": "Mybatis",
+        "icon": "$(references)"
+      },
+      {
+        "command": "Mybatis.refreshmapper",
+        "title": "Refresh Mappers",
+        "category": "Mybatis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "Mybatis.formatlog",
+        "title": "Convert MyBatis Log to SQL",
+        "category": "Mybatis",
+        "icon": "$(output)"
+      },
+      {
+        "command": "Mybatis.openLogOutput",
+        "title": "Open Log Output",
+        "category": "Mybatis"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "Mybatis.gotoxml",
+          "when": "resourceLangId == java",
+          "group": "navigation@1"
+        },
+        {
+          "command": "Mybatis.gotojava",
+          "when": "resourceLangId == xml",
+          "group": "navigation@1"
+        },
+        {
+          "command": "Mybatis.formatlog",
+          "when": "editorHasSelection",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Mybatis",
+      "properties": {
+        "Mybatis.logLevel": {
+          "type": "string",
+          "scope": "window",
+          "enum": [
+            "off",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info"
+        },
+        "Mybatis.sqlKeywordColor": {
+          "type": "string",
+          "default": "#24BFA5",
+          "description": "Highlight color for SQL keywords in MyBatis XML mapper and SQL files"
+        },
+        "Mybatis.sqlDangerColor": {
+          "type": "string",
+          "default": "#F44747",
+          "description": "Highlight color for destructive SQL keywords"
+        },
+        "Mybatis.sqlStringColor": {
+          "type": "string",
+          "default": "#f4d4ae",
+          "description": "Highlight color for SQL string literals"
+        },
+        "Mybatis.sqlNumberColor": {
+          "type": "string",
+          "default": "#00FF00",
+          "description": "Highlight color for SQL numeric literals"
+        },
+        "Mybatis.sqlCommentColor": {
+          "type": "string",
+          "default": "#ffff00",
+          "description": "Highlight color for SQL-native comments"
+        },
+        "Mybatis.sqlInvalidCommentColor": {
+          "type": "string",
+          "default": "#5d9b5d",
+          "description": "Highlight color for comments that do not belong to the current document language"
+        },
+        "Mybatis.sqlHighlightEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable SQL syntax highlighting in MyBatis XML mapper and SQL files"
+        },
+        "Mybatis.maxDocumentLength": {
+          "type": "number",
+          "default": 300000,
+          "minimum": 0,
+          "description": "Skip syntax highlighting above this document length. Use 0 for no limit."
+        },
+        "Mybatis.codeLensEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Java and XML mapper navigation CodeLens"
+        },
+        "Mybatis.languageFeaturesEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable MyBatis go-to-definition, hover, XML completion, and document symbols"
+        },
+        "Mybatis.searchExclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/target/**",
+            "**/build/**",
+            "**/out/**",
+            "**/dist/**",
+            "**/.git/**"
+          ],
+          "description": "Glob patterns excluded from XML mapper scanning"
+        }
+      }
+    }
+  },
+  "engines": {
+    "vscode": ">=1.110.0",
+    "node": ">=21.0.0",
+    "npm": ">=10.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "git": "bun run ~/.bootstrap/bootstrap-sync.ts --git",
+    "swc": "bun run ~/.bootstrap/bootstrap-sync.ts --swc",
+    "sync": "bun run ~/.bootstrap/bootstrap-sync.ts --sync",
+    "tools": "bun run ~/.bootstrap/bootstrap-sync.ts --tools"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.5",
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.15.46",
+    "@swc/helpers": "^0.5.23",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.1.1",
+    "@types/vscode": "1.110.0",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
+    "mocha": "^11.7.6",
+    "ts-morph": "^28.0.0",
+    "ts-prune": "^0.10.3",
+    "tsc-alias": "^1.9.1",
+    "typescript": "^7.0.2"
+  }
+}
