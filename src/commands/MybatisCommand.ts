@@ -1,13 +1,16 @@
 // commands/MybatisCommand.ts
 
 import { vscode } from "@exportLibs";
+import { extractSqlFragment, extractStatementXml, findLogStatementRef, renderPreviewSql } from "@exportModels";
 import { logger, notify, showLogOutput } from "@exportScripts";
-import type { MapperIndexServiceType, MapperLensProviderType, SqlDecoProviderType, SqlLogServiceType } from "@exportTypes";
+import type { JavaMethodType, MapperDiagnosticProviderType, MapperIndexServiceType, MapperLensProviderType, SqlDecoProviderType, SqlLogServiceType, XmlMapperType, XmlStatementType } from "@exportTypes";
+
+const REFID_VALUE_PATTERN = /\brefid\s*=\s*["']([^"']+)["']/g;
 
 // ------------------------------------------------------------------------------
 // 1. Mybatis 명령
 // ------------------------------------------------------------------------------
-export const MybatisCommand = (indexService: MapperIndexServiceType, logService: SqlLogServiceType, lensProvider: MapperLensProviderType, decoProvider: SqlDecoProviderType) => {
+export const MybatisCommand = (indexService: MapperIndexServiceType, logService: SqlLogServiceType, lensProvider: MapperLensProviderType, diagnosticProvider: MapperDiagnosticProviderType, decoProvider: SqlDecoProviderType) => {
   // 1-1. 파일의 특정 라인 열기
   const openLocation = async (fsPath: string, line: number): Promise<void> => {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
@@ -19,6 +22,24 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
 
   // 1-2. 메서드명으로 statement 태그 추정
   const guessTag = (name: string): string => /^(insert|add|save|create|register)/i.test(name) ? `insert` : /^(update|modify|change)/i.test(name) ? `update` : /^(delete|remove|drop|erase)/i.test(name) ? `delete` : `select`;
+
+  // 1-3. 커서 라인 기준 마지막 메서드/구문 탐색 (역방향, 배열 복사 없음)
+  const findMethodAtLine = (methods: JavaMethodType[], line: number): JavaMethodType | undefined => {
+    for (let i = methods.length - 1; i >= 0; i--) {
+      if (methods[i].line <= line) {
+        return methods[i];
+      }
+    }
+    return undefined;
+  };
+  const findStatementAtLine = (statements: XmlStatementType[], line: number): XmlStatementType | undefined => {
+    for (let i = statements.length - 1; i >= 0; i--) {
+      if (statements[i].line <= line) {
+        return statements[i];
+      }
+    }
+    return undefined;
+  };
 
   // 2-1. Java -> XML 이동
   const gotoXml = async (): Promise<void> => {
@@ -40,10 +61,10 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
     }
     const target = xmlMappers[0];
     const cursor = editor.selection.active.line;
-    const method = [...javaMapper.methods].reverse().find((m) => m.line <= cursor);
-    const statement = method ? target.statements.find((s) => s.id === method.name) : undefined;
-    logger(`debug`, `gotoxml - ${namespace} -> ${target.fsPath}`);
-    await openLocation(target.fsPath, statement ? statement.line : target.namespaceLine);
+    const method = findMethodAtLine(javaMapper.methods, cursor);
+    const found = method ? indexService.findStatementByNamespace(namespace, method.name) : undefined;
+    logger(`debug`, `gotoxml - ${namespace} -> ${(found?.mapper ?? target).fsPath}`);
+    await openLocation(found ? found.mapper.fsPath : target.fsPath, found ? found.statement.line : target.namespaceLine);
   };
 
   // 2-2. XML -> Java 이동
@@ -58,21 +79,19 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
       await notify(`warn`, `gotojava - not a valid MyBatis XML mapper.`);
       return;
     }
-    const javaUri = await indexService.findJavaUri(xmlMapper.namespace);
-    if (!javaUri) {
+    const indexed = await indexService.findJavaByNamespace(xmlMapper.namespace);
+    if (!indexed) {
       await notify(`warn`, `gotojava - no Java mapper found for ${xmlMapper.namespace}.`);
       return;
     }
-    const javaDoc = await vscode.workspace.openTextDocument(javaUri);
-    const javaMapper = indexService.getJavaMapper(javaDoc);
     const cursor = editor.selection.active.line;
-    const statement = [...xmlMapper.statements].reverse().find((s) => s.line <= cursor);
-    const method = statement && javaMapper ? javaMapper.methods.find((m) => m.name === statement.id) : undefined;
-    logger(`debug`, `gotojava - ${xmlMapper.namespace} -> ${javaUri.fsPath}`);
-    await openLocation(javaUri.fsPath, method ? method.line : (javaMapper?.interfaceLine ?? 0));
+    const statement = findStatementAtLine(xmlMapper.statements, cursor);
+    const method = statement ? indexed.mapper.methods.find((m) => m.name === statement.id) : undefined;
+    logger(`debug`, `gotojava - ${xmlMapper.namespace} -> ${indexed.uri.fsPath}`);
+    await openLocation(indexed.uri.fsPath, method ? method.line : indexed.mapper.interfaceLine);
   };
 
-  // 2-3. MyBatis 로그 -> SQL 변환 (선택 영역 우선, 없으면 클립보드)
+  // 2-3. MyBatis 로그 -> SQL 변환 (선택 영역 우선, 없으면 클립보드, 출처 statement 주석 포함)
   const formatLog = async (): Promise<void> => {
     const editor = vscode.window.activeTextEditor;
     const selected = editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : ``;
@@ -82,14 +101,126 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
       await notify(`warn`, `formatlog - no "Preparing:" line found in selection or clipboard.`);
       return;
     }
-    await logService.openAsDoc(logService.formatSql(sql));
+    const ref = findLogStatementRef(source);
+    const origin = ref ? indexService.findXmlBySimpleName(ref.simpleName).find((mapper) => mapper.statements.some((item) => item.id === ref.methodId)) : undefined;
+    const header = origin && ref ? `-- ${origin.namespace}.${ref.methodId}\n` : ``;
+    await logService.openAsDoc(header + logService.formatSql(sql));
+  };
+
+  // 2-3-1. 로그 선택/클립보드에서 원본 XML statement로 이동
+  const gotoLogStatement = async (): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const selected = editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : ``;
+    const source = selected || (await vscode.env.clipboard.readText());
+    const ref = source ? findLogStatementRef(source) : undefined;
+    if (!ref) {
+      await notify(`warn`, `gotologstatement - no mapper logger reference found near "Preparing:" line.`);
+      return;
+    }
+    for (const mapper of indexService.findXmlBySimpleName(ref.simpleName)) {
+      const statement = mapper.statements.find((item) => item.id === ref.methodId);
+      if (statement) {
+        logger(`debug`, `gotologstatement - ${mapper.namespace}.${ref.methodId}`);
+        // biome-ignore lint/performance/noAwaitInLoops: 첫 매칭에서 즉시 종료하는 순차 탐색임
+        await openLocation(mapper.fsPath, statement.line);
+        return;
+      }
+    }
+    await notify(`warn`, `gotologstatement - no XML statement found for ${ref.simpleName}.${ref.methodId}.`);
+  };
+
+  // 2-3-2. statement가 참조하는 fragment 본문 수집 (중첩 include 최대 5단계)
+  const resolveFragmentBody = async (xmlMapper: XmlMapperType, refid: string, docTextCache: Map<string, string>): Promise<string | undefined> => {
+    const bareId = refid.split(`.`).at(-1) ?? refid;
+    const dot = refid.lastIndexOf(`.`);
+    const pools = [
+      ...indexService.findXmlByNamespace(xmlMapper.namespace),
+      ...(dot > 0 ? indexService.findXmlByNamespace(refid.slice(0, dot)) : []),
+    ];
+    const pool = pools.length > 0 ? pools : [xmlMapper];
+    for (const mapper of pool) {
+      if (!mapper.fragments.some((item) => item.id === refid || item.id === bareId)) {
+        continue;
+      }
+      let text = docTextCache.get(mapper.fsPath);
+      if (text === undefined) {
+        // biome-ignore lint/performance/noAwaitInLoops: 첫 해석 성공 시 즉시 반환하는 순차 탐색임
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(mapper.fsPath));
+        text = doc.getText();
+        docTextCache.set(mapper.fsPath, text);
+      }
+      const body = extractSqlFragment(text, refid) ?? extractSqlFragment(text, bareId);
+      if (body !== undefined) {
+        return body;
+      }
+    }
+    return undefined;
+  };
+  const collectFragmentBodies = async (xmlMapper: XmlMapperType, rootXml: string): Promise<Map<string, string>> => {
+    const fragments = new Map<string, string>();
+    const docTextCache = new Map<string, string>();
+    let pending = [rootXml];
+    for (let depth = 0; depth < 5 && pending.length > 0; depth++) {
+      const nextPending: string[] = [];
+      for (const chunk of pending) {
+        const regex = new RegExp(REFID_VALUE_PATTERN.source, `g`);
+        for (let match = regex.exec(chunk); match; match = regex.exec(chunk)) {
+          const refid = match[1];
+          if (fragments.has(refid)) {
+            continue;
+          }
+          // biome-ignore lint/performance/noAwaitInLoops: 이미 해석된 fragment 중복 제거에 순차 실행이 필요함
+          const body = await resolveFragmentBody(xmlMapper, refid, docTextCache);
+          if (body === undefined) {
+            continue;
+          }
+          fragments.set(refid, body);
+          nextPending.push(body);
+        }
+      }
+      pending = nextPending;
+    }
+    return fragments;
+  };
+
+  // 2-3-3. 커서 statement의 동적 태그를 전개해 SQL 미리보기 열기
+  const previewSql = async (): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor?.document.languageId !== `xml`) {
+      await notify(`warn`, `previewsql - requires an active XML editor.`);
+      return;
+    }
+    const xmlMapper = indexService.syncDoc(editor.document);
+    if (!xmlMapper) {
+      await notify(`warn`, `previewsql - not a valid MyBatis XML mapper.`);
+      return;
+    }
+    const statement = findStatementAtLine(xmlMapper.statements, editor.selection.active.line);
+    if (!statement) {
+      await notify(`warn`, `previewsql - place the cursor inside a statement.`);
+      return;
+    }
+    const statementXml = extractStatementXml(editor.document.getText(), statement.id, statement.tag);
+    if (!statementXml) {
+      await notify(`warn`, `previewsql - could not extract <${statement.tag} id="${statement.id}">.`);
+      return;
+    }
+    const fragments = await collectFragmentBodies(xmlMapper, statementXml);
+    const sql = renderPreviewSql(statementXml, fragments);
+    if (!sql) {
+      await notify(`warn`, `previewsql - statement body is empty.`);
+      return;
+    }
+    logger(`debug`, `previewsql - ${xmlMapper.namespace}.${statement.id}`);
+    await logService.openAsDoc(`-- ${xmlMapper.namespace}.${statement.id}\n${sql}`);
   };
 
   // 2-4. 인덱스 재스캔
   const refresh = async (): Promise<void> => {
     const count = await indexService.scan();
     lensProvider.refresh();
-    decoProvider.apply();
+    diagnosticProvider.applyOpenDocuments();
+    decoProvider.applyVisible();
     await notify(`info`, `refresh - ${count} XML mappers indexed.`);
   };
 
@@ -134,6 +265,8 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
     vscode.commands.registerCommand(`Mybatis.gotojava`, gotoJava),
     vscode.commands.registerCommand(`Mybatis.refreshmapper`, refresh),
     vscode.commands.registerCommand(`Mybatis.formatlog`, formatLog),
+    vscode.commands.registerCommand(`Mybatis.previewsql`, previewSql),
+    vscode.commands.registerCommand(`Mybatis.gotologstatement`, gotoLogStatement),
     vscode.commands.registerCommand(`Mybatis.openLogOutput`, () => showLogOutput()),
     vscode.commands.registerCommand(`Mybatis.openlocation`, openLocation),
     vscode.commands.registerCommand(`Mybatis.createxmlstatement`, createXmlStatement),

@@ -1,7 +1,7 @@
 // exports/ExportTypes.ts
 
 import type { MybatisCommand } from "@exportCommands";
-import type { MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
+import type { MapperDiagnosticProvider, MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
 import type { MapperIndexService, SqlLogService } from "@exportServices";
 
 // XML statement 태그 ---------------------------------------------------------------
@@ -9,11 +9,35 @@ export const STATEMENT_TAGS = [`select`, `insert`, `update`, `delete`] as const;
 export type StatementTagType = (typeof STATEMENT_TAGS)[number];
 
 // XML mapper 인터페이스 -------------------------------------------------------------
+export interface XmlBindingType {
+  root: string;
+  raw: string;
+  line: number;
+  column: number;
+  length: number;
+}
+export interface XmlReferenceType {
+  kind: `include` | `resultMap`;
+  value: string;
+  line: number;
+  column: number;
+  length: number;
+}
 export interface XmlStatementType {
   id: string;
   tag: StatementTagType;
   line: number;
   column: number;
+  databaseId: string;
+  bindings: XmlBindingType[];
+  collections: XmlBindingType[];
+  localVars: string[];
+}
+export interface XmlTestExprType {
+  value: string;
+  line: number;
+  column: number;
+  length: number;
 }
 export interface XmlNamedElementType {
   id: string;
@@ -26,20 +50,37 @@ export interface XmlMapperType {
   fragments: XmlNamedElementType[];
   namespace: string;
   namespaceLine: number;
+  references: XmlReferenceType[];
   resultMaps: XmlNamedElementType[];
+  selectRefs: string[];
   statements: XmlStatementType[];
+  testExprs: XmlTestExprType[];
 }
 
 // Java mapper 인터페이스 ------------------------------------------------------------
 export interface JavaMethodType {
   name: string;
   line: number;
+  paramNames: string[];
+  paramCount: number;
+  allParamsNamed: boolean;
+  hasSqlAnnotation: boolean;
+  hasBody: boolean;
+}
+export interface JavaCallSiteType {
+  receiver: string;
+  method: string;
+}
+export interface LogStatementRefType {
+  simpleName: string;
+  methodId: string;
 }
 export interface JavaMapperType {
   packageName: string;
   interfaceName: string;
   interfaceLine: number;
   hasMapperAnnotation: boolean;
+  hasParent: boolean;
   methods: JavaMethodType[];
 }
 
@@ -47,6 +88,7 @@ export interface JavaMapperType {
 export type MybatisCommandType = ReturnType<typeof MybatisCommand>;
 
 // providers ----------------------------------------------------------------------
+export type MapperDiagnosticProviderType = ReturnType<typeof MapperDiagnosticProvider>;
 export type MapperLanguageProviderType = ReturnType<typeof MapperLanguageProvider>;
 export type MapperLensProviderType = ReturnType<typeof MapperLensProvider>;
 export type SqlDecoProviderType = ReturnType<typeof SqlDecorationProvider>;

@@ -12,7 +12,7 @@ interface DecorationGroup {
 }
 
 interface DecorationCache {
-  editor: vscode.TextEditor;
+  epoch: number;
   maxDocumentLength: number;
   uri: string;
   version: number;
@@ -23,11 +23,23 @@ interface ExclusionRange {
   start: number;
 }
 
+interface ExclusionSets {
+  invalidComment: ExclusionRange[];
+  nativeComment: ExclusionRange[];
+  standard: ExclusionRange[];
+}
+
 const XML_COMMENT_PATTERN = `<!--[\\s\\S]*?-->`;
 const SQL_COMMENT_PATTERN = `--[^\\r\\n]*|/\\*[\\s\\S]*?\\*/`;
 const SQL_STRING_PATTERN = `'(?:''|[^'])*'`;
 const SQL_NUMBER_PATTERN = `\\b(?:0x[0-9A-Fa-f]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b`;
 const XML_MARKUP_PATTERN = `<[\\s\\S]*?>|#\\{[^}]*\\}|\\$\\{[^}]*\\}`;
+const XML_COMMENT_REGEX = new RegExp(XML_COMMENT_PATTERN, `g`);
+const SQL_COMMENT_REGEX = new RegExp(SQL_COMMENT_PATTERN, `g`);
+const SQL_STRING_REGEX = new RegExp(SQL_STRING_PATTERN, `g`);
+const XML_MARKUP_REGEX = new RegExp(XML_MARKUP_PATTERN, `g`);
+const JAVA_SQL_ANNOTATION_PATTERN = `@(?:Select|Insert|Update|Delete)\\s*\\(`;
+const JAVA_STRING_PATTERN = `"(?:\\\\.|[^"\\\\])*"`;
 
 // ------------------------------------------------------------------------------
 // 1. SQL/XML syntax 데코레이션
@@ -37,7 +49,8 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
   let commonGroups: DecorationGroup[] = [];
   let sqlGroups: DecorationGroup[] = [];
   let xmlGroups: DecorationGroup[] = [];
-  let cache: DecorationCache | undefined;
+  let cacheEpoch = 0;
+  const editorCache = new WeakMap<vscode.TextEditor, DecorationCache>();
 
   // 1-1. 설정 조회
   const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(`Mybatis`);
@@ -70,7 +83,7 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
         "useExclusions": true,
       },
       {
-        "decorationType": createType(config.get<string>(`sqlKeywordColor`, `#24BFA5`), true),
+        "decorationType": createType(config.get<string>(`sqlKeywordColor`, `#c586c0`), true),
         "exclusionKind": `standard`,
         "pattern": getKeywordRegex(),
         "useExclusions": true,
@@ -116,7 +129,7 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
         "useExclusions": true,
       },
     ];
-    cache = undefined;
+    cacheEpoch += 1;
   };
 
   // 1-5. 문서 길이 계산
@@ -125,71 +138,86 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
     return document.offsetAt(lastLine.range.end);
   };
 
-  // 1-6. 제외 범위 병합
+  // 1-6. 제외 범위 병합 (입력 범위 객체는 세트 간 공유되므로 변형 금지)
   const mergeRanges = (ranges: ExclusionRange[]): ExclusionRange[] => {
     ranges.sort((a, b) => a.start - b.start);
     const merged: ExclusionRange[] = [];
     for (const range of ranges) {
       const last = merged.at(-1);
-      if (!last) {
-        merged.push(range);
-      }
-      else if (range.start <= last.end) {
+      if (last && range.start <= last.end) {
         last.end = Math.max(last.end, range.end);
       }
       else {
-        merged.push(range);
+        merged.push({ "end": range.end, "start": range.start });
       }
     }
     return merged;
   };
 
   // 1-7. 정규식 매칭 범위 수집
-  const collectRanges = (text: string, pattern: string): ExclusionRange[] => {
+  const collectRanges = (text: string, regex: RegExp): ExclusionRange[] => {
     const ranges: ExclusionRange[] = [];
-    const regex = new RegExp(pattern, `g`);
+    regex.lastIndex = 0;
     for (let match = regex.exec(text); match; match = regex.exec(text)) {
       ranges.push({ "end": match.index + match[0].length, "start": match.index });
     }
     return ranges;
   };
 
-  // 1-8. 키워드/리터럴 제외 범위 생성
-  const buildExclusions = (text: string, language: string): ExclusionRange[] => {
-    const ranges = [
-      ...collectRanges(text, SQL_COMMENT_PATTERN),
-      ...collectRanges(text, XML_COMMENT_PATTERN),
-    ];
-    if (language === `xml`) {
-      ranges.push(...collectRanges(text, XML_MARKUP_PATTERN));
+  // 1-8. 그룹별 제외 범위 생성 (기본 패턴을 문서당 1회씩만 스캔 후 조합)
+  const buildExclusionSets = (text: string, language: string): ExclusionSets => {
+    const sqlComments = collectRanges(text, SQL_COMMENT_REGEX);
+    const xmlComments = collectRanges(text, XML_COMMENT_REGEX);
+    const sqlStrings = collectRanges(text, SQL_STRING_REGEX);
+    const xmlMarkups = language === `xml` ? collectRanges(text, XML_MARKUP_REGEX) : [];
+    return {
+      "standard": mergeRanges([...sqlComments, ...xmlComments, ...xmlMarkups]),
+      "nativeComment": mergeRanges(language === `sql` ? [...sqlStrings, ...xmlComments] : [...sqlStrings]),
+      "invalidComment": mergeRanges(language === `xml` ? [...sqlStrings, ...xmlComments, ...xmlMarkups] : [...sqlStrings, ...sqlComments]),
+    };
+  };
+
+  // 1-9. Java SQL 어노테이션(@Select 등) 내부 문자열 리터럴 범위 수집
+  const collectJavaSqlRanges = (text: string): ExclusionRange[] => {
+    const ranges: ExclusionRange[] = [];
+    const annotationRegex = new RegExp(JAVA_SQL_ANNOTATION_PATTERN, `g`);
+    const stringRegex = new RegExp(JAVA_STRING_PATTERN, `g`);
+    for (let match = annotationRegex.exec(text); match; match = annotationRegex.exec(text)) {
+      const open = match.index + match[0].length - 1;
+      let depth = 0;
+      let close = open;
+      for (let i = open; i < text.length; i++) {
+        const char = text[i];
+        if (char === `"`) {
+          // 문자열 내부의 괄호는 깊이 계산에서 제외
+          i += 1;
+          while (i < text.length && (text[i] !== `"` || text[i - 1] === `\\`)) {
+            i += 1;
+          }
+          continue;
+        }
+        if (char === `(`) {
+          depth += 1;
+        }
+        else if (char === `)`) {
+          depth -= 1;
+        }
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+      stringRegex.lastIndex = open;
+      for (let str = stringRegex.exec(text); str && str.index < close; str = stringRegex.exec(text)) {
+        ranges.push({ "end": str.index + str[0].length - 1, "start": str.index + 1 });
+      }
+      annotationRegex.lastIndex = Math.max(annotationRegex.lastIndex, close);
     }
     return mergeRanges(ranges);
   };
 
-  // 1-9. 정상 주석 오탐 제외 범위 생성
-  const buildNativeCommentExclusions = (text: string, language: string): ExclusionRange[] => {
-    const ranges = [...collectRanges(text, SQL_STRING_PATTERN)];
-    if (language === `sql`) {
-      ranges.push(...collectRanges(text, XML_COMMENT_PATTERN));
-    }
-    return mergeRanges(ranges);
-  };
-
-  // 1-10. 잘못된 주석 오탐 제외 범위 생성
-  const buildInvalidCommentExclusions = (text: string, language: string): ExclusionRange[] => {
-    const ranges = [...collectRanges(text, SQL_STRING_PATTERN)];
-    if (language === `xml`) {
-      ranges.push(...collectRanges(text, XML_COMMENT_PATTERN));
-      ranges.push(...collectRanges(text, XML_MARKUP_PATTERN));
-    }
-    else {
-      ranges.push(...collectRanges(text, SQL_COMMENT_PATTERN));
-    }
-    return mergeRanges(ranges);
-  };
-
-  // 1-11. 오프셋 제외 여부
-  const isExcluded = (ranges: ExclusionRange[], index: number): boolean => {
+  // 1-10. 오프셋 범위 포함 여부 (XML/SQL에서는 제외, Java에서는 포함 판정에 사용)
+  const inRanges = (ranges: ExclusionRange[], index: number): boolean => {
     let low = 0;
     let high = ranges.length - 1;
     while (low <= high) {
@@ -208,76 +236,104 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
     return false;
   };
 
-  // 1-12. 활성 에디터 데코레이션 제거
+  // 1-11. 활성 에디터 데코레이션 제거
   const clear = (editor: vscode.TextEditor): void => {
     for (const group of [...commonGroups, ...sqlGroups, ...xmlGroups]) {
       editor.setDecorations(group.decorationType, []);
     }
   };
 
-  // 1-13. 활성 에디터에 SQL 문법 데코레이션 적용
+  // 1-12. 활성 에디터에 SQL 문법 데코레이션 적용 (xml/sql 전체, java는 SQL 어노테이션 문자열만)
   const apply = (editor?: vscode.TextEditor): void => {
     const target = editor ?? vscode.window.activeTextEditor;
-    if (!target || (target.document.languageId !== `xml` && target.document.languageId !== `sql`)) {
+    const languageId = target?.document.languageId;
+    if (!target || (languageId !== `xml` && languageId !== `sql` && languageId !== `java`)) {
       return;
     }
     const document = target.document;
     const config = getConfig();
     if (!config.get<boolean>(`sqlHighlightEnabled`, true)) {
       clear(target);
-      cache = undefined;
+      editorCache.delete(target);
       return;
     }
     if (document.languageId === `xml` && !indexService.syncDoc(document)) {
       clear(target);
-      cache = undefined;
+      editorCache.delete(target);
       return;
     }
     const maxDocLength = Math.max(0, config.get<number>(`maxDocumentLength`, 300_000));
     const docLength = getDocumentLength(document);
     const uri = document.uri.toString();
-    const cacheHit = cache?.editor === target && cache.uri === uri && cache.version === document.version && cache.maxDocumentLength === maxDocLength;
+    const cached = editorCache.get(target);
+    const cacheHit = cached?.epoch === cacheEpoch && cached.uri === uri && cached.version === document.version && cached.maxDocumentLength === maxDocLength;
     if (cacheHit) {
       return;
     }
     if (maxDocLength > 0 && docLength > maxDocLength) {
       clear(target);
-      cache = { "editor": target, "maxDocumentLength": maxDocLength, uri, "version": document.version };
+      editorCache.set(target, { "epoch": cacheEpoch, "maxDocumentLength": maxDocLength, uri, "version": document.version });
       return;
     }
     const text = document.getText();
-    const standardExclusions = buildExclusions(text, document.languageId);
-    const nativeExclusions = buildNativeCommentExclusions(text, document.languageId);
-    const invalidExclusions = buildInvalidCommentExclusions(text, document.languageId);
+    if (document.languageId === `java`) {
+      const inclusions = collectJavaSqlRanges(text);
+      if (inclusions.length === 0) {
+        clear(target);
+        editorCache.set(target, { "epoch": cacheEpoch, "maxDocumentLength": maxDocLength, uri, "version": document.version });
+        return;
+      }
+      for (const group of [...sqlGroups, ...xmlGroups]) {
+        target.setDecorations(group.decorationType, []);
+      }
+      for (const group of commonGroups) {
+        const ranges: vscode.Range[] = [];
+        group.pattern.lastIndex = 0;
+        for (let match = group.pattern.exec(text); match; match = group.pattern.exec(text)) {
+          if (!inRanges(inclusions, match.index)) {
+            continue;
+          }
+          ranges.push(new vscode.Range(document.positionAt(match.index), document.positionAt(match.index + match[0].length)));
+        }
+        target.setDecorations(group.decorationType, ranges);
+      }
+      editorCache.set(target, { "epoch": cacheEpoch, "maxDocumentLength": maxDocLength, uri, "version": document.version });
+      logger(`debug`, `decorate - java annotation sql in ${document.uri.fsPath}`);
+      return;
+    }
+    const exclusionSets = buildExclusionSets(text, document.languageId);
     const languageGroups = document.languageId === `xml` ? xmlGroups : sqlGroups;
     for (const group of [...languageGroups, ...commonGroups]) {
       const ranges: vscode.Range[] = [];
-      const exclusions = group.exclusionKind === `invalidComment`
-        ? invalidExclusions
-        : group.exclusionKind === `nativeComment`
-          ? nativeExclusions
-          : standardExclusions;
+      const exclusions = exclusionSets[group.exclusionKind ?? `standard`];
       group.pattern.lastIndex = 0;
       for (let match = group.pattern.exec(text); match; match = group.pattern.exec(text)) {
-        if (group.useExclusions && isExcluded(exclusions, match.index)) {
+        if (group.useExclusions && inRanges(exclusions, match.index)) {
           continue;
         }
         ranges.push(new vscode.Range(document.positionAt(match.index), document.positionAt(match.index + match[0].length)));
       }
       target.setDecorations(group.decorationType, ranges);
     }
-    cache = { "editor": target, "maxDocumentLength": maxDocLength, uri, "version": document.version };
+    editorCache.set(target, { "epoch": cacheEpoch, "maxDocumentLength": maxDocLength, uri, "version": document.version });
     logger(`debug`, `decorate - ${document.languageId} syntax in ${document.uri.fsPath}`);
   };
 
-  // 1-14. 정리
+  // 1-12-1. 보이는 모든 에디터에 적용 (설정 변경/재스캔/워처 갱신용 — 분할 뷰 유실 방지)
+  const applyVisible = (): void => {
+    for (const editor of vscode.window.visibleTextEditors) {
+      apply(editor);
+    }
+  };
+
+  // 1-13. 정리
   const dispose = (): void => {
     disposeGroups();
-    cache = undefined;
+    cacheEpoch += 1;
   };
 
   rebuild();
 
   // 99. return -----------------------------------------------------------------------------
-  return { apply, rebuild, dispose };
+  return { apply, applyVisible, rebuild, dispose };
 };

@@ -107,5 +107,72 @@
       "<![CDATA[$1]]>"
     ],
     "description": "Create a CDATA section"
+  },
+  "mybatis choose": {
+    "prefix": "choose",
+    "body": [
+      "<choose>",
+      "\t<when test=\"$1\">",
+      "\t\t$2",
+      "\t</when>",
+      "\t<otherwise>",
+      "\t\t$0",
+      "\t</otherwise>",
+      "</choose>"
+    ],
+    "description": "Create a choose/when/otherwise branch"
+  },
+  "mybatis set": {
+    "prefix": "set",
+    "body": [
+      "<set>",
+      "\t<if test=\"$1 != null\">$2 = #{$1},</if>",
+      "\t$0",
+      "</set>"
+    ],
+    "description": "Create a set wrapper for dynamic updates"
+  },
+  "mybatis trim": {
+    "prefix": "trim",
+    "body": [
+      "<trim prefix=\"$1\" prefixOverrides=\"AND |OR \">",
+      "\t$0",
+      "</trim>"
+    ],
+    "description": "Create a trim wrapper"
+  },
+  "mybatis bind": {
+    "prefix": "bind",
+    "body": [
+      "<bind name=\"$1\" value=\"'%' + $2 + '%'\"/>"
+    ],
+    "description": "Create a bind variable (e.g. LIKE pattern)"
+  },
+  "mybatis selectKey": {
+    "prefix": "selectKey",
+    "body": [
+      "<selectKey keyProperty=\"$1\" resultType=\"long\" order=\"${2|BEFORE,AFTER|}\">",
+      "\tSELECT LAST_INSERT_ID()",
+      "</selectKey>"
+    ],
+    "description": "Create a selectKey for generated keys"
+  },
+  "mybatis paging": {
+    "prefix": "paging",
+    "body": [
+      "LIMIT #{${1:size}} OFFSET #{${2:offset}}"
+    ],
+    "description": "Create a LIMIT/OFFSET paging clause"
+  },
+  "mybatis where if": {
+    "prefix": "whereif",
+    "body": [
+      "<where>",
+      "\t<if test=\"$1 != null and $1 != ''\">",
+      "\t\tAND $2 = #{$1}",
+      "\t</if>",
+      "</where>"
+    ],
+    "description": "Create a where wrapper with a conditional filter"
   }
 }

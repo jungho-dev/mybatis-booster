@@ -6,7 +6,7 @@
   "icon": "logo.webp",
   "license": "Apache-2.0",
   "main": "./out/extension.js",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "categories": [
     "Other"
   ],
@@ -59,6 +59,18 @@
         "icon": "$(output)"
       },
       {
+        "command": "Mybatis.previewsql",
+        "title": "Preview SQL from Statement",
+        "category": "Mybatis",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "Mybatis.gotologstatement",
+        "title": "Go to Statement from Log",
+        "category": "Mybatis",
+        "icon": "$(search)"
+      },
+      {
         "command": "Mybatis.openLogOutput",
         "title": "Open Log Output",
         "category": "Mybatis"
@@ -80,6 +92,16 @@
           "command": "Mybatis.formatlog",
           "when": "editorHasSelection",
           "group": "navigation@2"
+        },
+        {
+          "command": "Mybatis.previewsql",
+          "when": "resourceLangId == xml",
+          "group": "navigation@3"
+        },
+        {
+          "command": "Mybatis.gotologstatement",
+          "when": "editorHasSelection",
+          "group": "navigation@4"
         }
       ]
     },
@@ -93,6 +115,7 @@
             "off",
             "debug",
             "info",
+            "hint",
             "warn",
             "error"
           ],
@@ -100,7 +123,7 @@
         },
         "Mybatis.sqlKeywordColor": {
           "type": "string",
-          "default": "#24BFA5",
+          "default": "#c586c0",
           "description": "Highlight color for SQL keywords in MyBatis XML mapper and SQL files"
         },
         "Mybatis.sqlDangerColor": {
@@ -158,6 +181,7 @@
             "**/node_modules/**",
             "**/target/**",
             "**/build/**",
+            "**/bin/**",
             "**/out/**",
             "**/dist/**",
             "**/.git/**"
