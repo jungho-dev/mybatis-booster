@@ -16,7 +16,7 @@ const STATEMENT_ID_PREFIX_PATTERN = /\bid\s*=\s*["'][^"']*$/;
 // ------------------------------------------------------------------------------
 export const MapperLanguageProvider = (indexService: MapperIndexServiceType) => {
   // 1-1. 언어 기능 활성화 여부
-  const isEnabled = (): boolean => vscode.workspace.getConfiguration(`Mybatis`).get<boolean>(`languageFeaturesEnabled`, true);
+  const isEnabled = (): boolean => vscode.workspace.getConfiguration(`Mybatis-Booster`).get<boolean>(`languageFeaturesEnabled`, true);
 
   // 1-2. 안전한 단일 라인 range 생성
   const lineRange = (document: vscode.TextDocument, line: number): vscode.Range => {

@@ -34,7 +34,7 @@ export const MapperIndexService = () => {
   let excludeSignature: string | null = null;
 
   // 1-1. 스캔 제외 설정/글롭 생성
-  const getExcludeList = (): string[] => vscode.workspace.getConfiguration(`Mybatis`).get<string[]>(`searchExclude`, []);
+  const getExcludeList = (): string[] => vscode.workspace.getConfiguration(`Mybatis-Booster`).get<string[]>(`searchExclude`, []);
   const getExcludeGlob = (): string | undefined => {
     const list = getExcludeList();
     return list.length > 0 ? `{${list.join(`,`)}}` : undefined;

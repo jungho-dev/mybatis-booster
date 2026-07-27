@@ -1,4 +1,4 @@
-# mybatis Architecture
+# Mybatis-Booster Architecture
 
 ## Runtime Surface
 
@@ -54,7 +54,7 @@ CodeLens and file watcher refreshes.
 
 ## Index And Watcher Model
 
-`MapperIndexService` scans `**/*.xml` minus `Mybatis.searchExclude` globs in batches of `50`,
+`MapperIndexService` scans `**/*.xml` minus `Mybatis-Booster.searchExclude` globs in batches of `50`,
 parsing only files whose text contains a `<mapper namespace>` root. A single `FileSystemWatcher`
 re-indexes changed files with a `200ms` per-path debounce. Open XML documents re-parse through
 `syncDoc` so dirty editors stay accurate. Java parses cache per document version in an LRU of
@@ -72,7 +72,7 @@ re-indexes changed files with a `200ms` per-path debounce. Open XML documents re
 
 ## Responsiveness Rules
 
-- `Mybatis.logLevel=off` suppresses console and output-channel formatting work.
+- `Mybatis-Booster.logLevel=off` suppresses console and output-channel formatting work.
 - XML scans run in batches of `50` files.
 - Watcher re-index and editor decoration refresh are debounced (`200ms` / `300ms`).
 - Decoration masks XML markup and comments once per apply instead of parsing per keyword.

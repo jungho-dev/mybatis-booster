@@ -12,7 +12,7 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
   const changeEmitter = new vscode.EventEmitter<void>();
 
   // 1-1. CodeLens 활성화 여부
-  const isLensEnabled = (): boolean => vscode.workspace.getConfiguration(`Mybatis`).get<boolean>(`codeLensEnabled`, true);
+  const isLensEnabled = (): boolean => vscode.workspace.getConfiguration(`Mybatis-Booster`).get<boolean>(`codeLensEnabled`, true);
 
   // 1-2. 단일 라인 range 생성
   const lineRange = (line: number): vscode.Range => new vscode.Range(line, 0, line, 0);
@@ -27,7 +27,7 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
     }
     const lenses: vscode.CodeLens[] = [];
     lenses.push(new vscode.CodeLens(lineRange(javaMapper.interfaceLine), {
-      "command": `Mybatis.openlocation`,
+      "command": `Mybatis-Booster.openlocation`,
       "title": `$(arrow-right) Go to XML Mapper`,
       "arguments": [xmlMappers[0].fsPath, xmlMappers[0].namespaceLine],
     }));
@@ -37,11 +37,11 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
         continue;
       }
       lenses.push(new vscode.CodeLens(lineRange(method.line), entry ? {
-            "command": `Mybatis.openlocation`,
+            "command": `Mybatis-Booster.openlocation`,
             "title": `$(arrow-right) Go to XML (${entry.statement.tag})`,
             "arguments": [entry.fsPath, entry.statement.line],
           } : {
-            "command": `Mybatis.createxmlstatement`,
+            "command": `Mybatis-Booster.createxmlstatement`,
             "title": `$(add) Create XML statement`,
             "arguments": [xmlMappers[0].fsPath, method.name],
           }));
@@ -54,18 +54,18 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
     const methodsByName = new Map(javaMapper.methods.map((method) => [method.name, method]));
     const lenses: vscode.CodeLens[] = [];
     lenses.push(new vscode.CodeLens(lineRange(xmlMapper.namespaceLine), {
-      "command": `Mybatis.openlocation`,
+      "command": `Mybatis-Booster.openlocation`,
       "title": `$(arrow-right) Go to Java Mapper`,
       "arguments": [javaPath, javaMapper.interfaceLine],
     }));
     for (const statement of xmlMapper.statements) {
       const method = methodsByName.get(statement.id);
       lenses.push(new vscode.CodeLens(lineRange(statement.line), method ? {
-            "command": `Mybatis.openlocation`,
+            "command": `Mybatis-Booster.openlocation`,
             "title": `$(arrow-right) Go to Java Method`,
             "arguments": [javaPath, method.line],
           } : {
-            "command": `Mybatis.createjavamethod`,
+            "command": `Mybatis-Booster.createjavamethod`,
             "title": `$(add) Create Java method`,
             "arguments": [javaPath, statement.id, statement.tag],
           }));

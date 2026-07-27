@@ -17,7 +17,7 @@ export const activate = (context: vscode.ExtensionContext) => {
 
   // 0. Initialize Logger ------------------------------------------------------------------------
   initLogger();
-  logger(`info`, `Mybatis is now active!`);
+  logger(`info`, `Mybatis-Booster is now active!`);
 
   if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
     notify(`warn`, `activate - requires an open workspace to function properly.`);
@@ -109,21 +109,21 @@ const setupListeners = (indexService: MapperIndexServiceType, lensProvider: Mapp
   });
 
   const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (!e.affectsConfiguration(`Mybatis`)) {
+    if (!e.affectsConfiguration(`Mybatis-Booster`)) {
       return;
     }
     logger(`debug`, `activate - configuration changed`);
     if (
-      e.affectsConfiguration(`Mybatis.sqlKeywordColor`) ||
-      e.affectsConfiguration(`Mybatis.sqlDangerColor`) ||
-      e.affectsConfiguration(`Mybatis.sqlStringColor`) ||
-      e.affectsConfiguration(`Mybatis.sqlNumberColor`) ||
-      e.affectsConfiguration(`Mybatis.sqlCommentColor`) ||
-      e.affectsConfiguration(`Mybatis.sqlInvalidCommentColor`)
+      e.affectsConfiguration(`Mybatis-Booster.sqlKeywordColor`) ||
+      e.affectsConfiguration(`Mybatis-Booster.sqlDangerColor`) ||
+      e.affectsConfiguration(`Mybatis-Booster.sqlStringColor`) ||
+      e.affectsConfiguration(`Mybatis-Booster.sqlNumberColor`) ||
+      e.affectsConfiguration(`Mybatis-Booster.sqlCommentColor`) ||
+      e.affectsConfiguration(`Mybatis-Booster.sqlInvalidCommentColor`)
     ) {
       decoProvider.rebuild();
     }
-    e.affectsConfiguration(`Mybatis.searchExclude`) ? indexService.scan().then(() => {
+    e.affectsConfiguration(`Mybatis-Booster.searchExclude`) ? indexService.scan().then(() => {
           lensProvider.refresh();
           diagnosticProvider.applyOpenDocuments();
           decoProvider.applyVisible();

@@ -1,6 +1,6 @@
-# Mybatis
+# Mybatis-Booster
 
-Mybatis is a VS Code extension that connects MyBatis Java mapper interfaces and XML mapper files.
+Mybatis-Booster is a VS Code extension that connects MyBatis Java mapper interfaces and XML mapper files.
 It is a clean-room reimplementation of the core MybatisX features in pure TypeScript, without the
 Red Hat Java extension or JDT language-server dependency.
 
@@ -21,28 +21,28 @@ Red Hat Java extension or JDT language-server dependency.
 
 | Command | Purpose |
 | --- | --- |
-| `Mybatis.gotoxml` | Jump from the active Java mapper to its XML mapper statement. |
-| `Mybatis.gotojava` | Jump from the active XML mapper to its Java mapper method. |
-| `Mybatis.refreshmapper` | Rescan the workspace and rebuild the XML mapper index. |
-| `Mybatis.formatlog` | Convert selected or clipboard MyBatis log text into SQL. |
-| `Mybatis.openLogOutput` | Open the Mybatis output channel. |
+| `Mybatis-Booster.gotoxml` | Jump from the active Java mapper to its XML mapper statement. |
+| `Mybatis-Booster.gotojava` | Jump from the active XML mapper to its Java mapper method. |
+| `Mybatis-Booster.refreshmapper` | Rescan the workspace and rebuild the XML mapper index. |
+| `Mybatis-Booster.formatlog` | Convert selected or clipboard MyBatis log text into SQL. |
+| `Mybatis-Booster.openLogOutput` | Open the Mybatis-Booster output channel. |
 
 ## Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `Mybatis.logLevel` | `info` | Controls extension logging: `off`, `debug`, `info`, `warn`, `error`. |
-| `Mybatis.sqlKeywordColor` | `#24BFA5` | Highlight color for SQL keywords in XML mapper and SQL files. |
-| `Mybatis.sqlDangerColor` | `#F44747` | Highlight color for destructive SQL keywords. |
-| `Mybatis.sqlStringColor` | `#f4d4ae` | Highlight color for SQL string literals. |
-| `Mybatis.sqlNumberColor` | `#00FF00` | Highlight color for SQL numeric literals. |
-| `Mybatis.sqlCommentColor` | `#ffff00` | Highlight color for SQL-native comments. |
-| `Mybatis.sqlInvalidCommentColor` | `#5d9b5d` | Highlight color for comments that do not belong to the current document language. |
-| `Mybatis.sqlHighlightEnabled` | `true` | Enables SQL syntax highlighting. |
-| `Mybatis.maxDocumentLength` | `300000` | Skips syntax highlighting above this document length. |
-| `Mybatis.codeLensEnabled` | `true` | Enables Java and XML navigation CodeLens. |
-| `Mybatis.languageFeaturesEnabled` | `true` | Enables Go to Definition, hover, XML completion, and document symbols. |
-| `Mybatis.searchExclude` | build dirs | Glob patterns excluded from XML mapper scanning. |
+| `Mybatis-Booster.logLevel` | `info` | Controls extension logging: `off`, `debug`, `info`, `warn`, `error`. |
+| `Mybatis-Booster.sqlKeywordColor` | `#24BFA5` | Highlight color for SQL keywords in XML mapper and SQL files. |
+| `Mybatis-Booster.sqlDangerColor` | `#F44747` | Highlight color for destructive SQL keywords. |
+| `Mybatis-Booster.sqlStringColor` | `#f4d4ae` | Highlight color for SQL string literals. |
+| `Mybatis-Booster.sqlNumberColor` | `#00FF00` | Highlight color for SQL numeric literals. |
+| `Mybatis-Booster.sqlCommentColor` | `#ffff00` | Highlight color for SQL-native comments. |
+| `Mybatis-Booster.sqlInvalidCommentColor` | `#5d9b5d` | Highlight color for comments that do not belong to the current document language. |
+| `Mybatis-Booster.sqlHighlightEnabled` | `true` | Enables SQL syntax highlighting. |
+| `Mybatis-Booster.maxDocumentLength` | `300000` | Skips syntax highlighting above this document length. |
+| `Mybatis-Booster.codeLensEnabled` | `true` | Enables Java and XML navigation CodeLens. |
+| `Mybatis-Booster.languageFeaturesEnabled` | `true` | Enables Go to Definition, hover, XML completion, and document symbols. |
+| `Mybatis-Booster.searchExclude` | build dirs | Glob patterns excluded from XML mapper scanning. |
 
 ## How It Works
 

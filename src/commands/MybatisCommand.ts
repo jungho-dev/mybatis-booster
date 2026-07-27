@@ -261,16 +261,16 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
 
   // 3-1. 명령 등록
   const registerCommands = (): vscode.Disposable[] => [
-    vscode.commands.registerCommand(`Mybatis.gotoxml`, gotoXml),
-    vscode.commands.registerCommand(`Mybatis.gotojava`, gotoJava),
-    vscode.commands.registerCommand(`Mybatis.refreshmapper`, refresh),
-    vscode.commands.registerCommand(`Mybatis.formatlog`, formatLog),
-    vscode.commands.registerCommand(`Mybatis.previewsql`, previewSql),
-    vscode.commands.registerCommand(`Mybatis.gotologstatement`, gotoLogStatement),
-    vscode.commands.registerCommand(`Mybatis.openLogOutput`, () => showLogOutput()),
-    vscode.commands.registerCommand(`Mybatis.openlocation`, openLocation),
-    vscode.commands.registerCommand(`Mybatis.createxmlstatement`, createXmlStatement),
-    vscode.commands.registerCommand(`Mybatis.createjavamethod`, createJavaMethod),
+    vscode.commands.registerCommand(`Mybatis-Booster.gotoxml`, gotoXml),
+    vscode.commands.registerCommand(`Mybatis-Booster.gotojava`, gotoJava),
+    vscode.commands.registerCommand(`Mybatis-Booster.refreshmapper`, refresh),
+    vscode.commands.registerCommand(`Mybatis-Booster.formatlog`, formatLog),
+    vscode.commands.registerCommand(`Mybatis-Booster.previewsql`, previewSql),
+    vscode.commands.registerCommand(`Mybatis-Booster.gotologstatement`, gotoLogStatement),
+    vscode.commands.registerCommand(`Mybatis-Booster.openLogOutput`, () => showLogOutput()),
+    vscode.commands.registerCommand(`Mybatis-Booster.openlocation`, openLocation),
+    vscode.commands.registerCommand(`Mybatis-Booster.createxmlstatement`, createXmlStatement),
+    vscode.commands.registerCommand(`Mybatis-Booster.createjavamethod`, createJavaMethod),
   ];
 
   // 99. return -----------------------------------------------------------------------------

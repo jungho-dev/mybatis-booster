@@ -33,7 +33,14 @@ const XML_COMMENT_PATTERN = `<!--[\\s\\S]*?-->`;
 const SQL_COMMENT_PATTERN = `--[^\\r\\n]*|/\\*[\\s\\S]*?\\*/`;
 const SQL_STRING_PATTERN = `'(?:''|[^'])*'`;
 const SQL_NUMBER_PATTERN = `\\b(?:0x[0-9A-Fa-f]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b`;
-const XML_MARKUP_PATTERN = `<[\\s\\S]*?>|#\\{[^}]*\\}|\\$\\{[^}]*\\}`;
+const XML_CDATA_OPEN = `<![CDATA[`;
+const XML_CDATA_CLOSE = `]]>`;
+// 미종료 CDATA(편집 중)도 여는 구분자만 인식하도록 두 번째 분기를 둠
+const XML_CDATA_PATTERN = `<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|<!\\[CDATA\\[`;
+// 속성값 안의 > 를 태그 종료로 오인하지 않도록 따옴표 구간을 건너뜀
+const XML_TAG_PATTERN = `<[^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>`;
+// 분기 순서가 곧 우선순위: 주석과 CDATA를 태그보다 먼저 확정해야 경계가 밀리지 않음
+const XML_MARKUP_PATTERN = `${XML_COMMENT_PATTERN}|${XML_CDATA_PATTERN}|${XML_TAG_PATTERN}|#\\{[^}]*\\}|\\$\\{[^}]*\\}`;
 const XML_COMMENT_REGEX = new RegExp(XML_COMMENT_PATTERN, `g`);
 const SQL_COMMENT_REGEX = new RegExp(SQL_COMMENT_PATTERN, `g`);
 const SQL_STRING_REGEX = new RegExp(SQL_STRING_PATTERN, `g`);
@@ -53,7 +60,7 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
   const editorCache = new WeakMap<vscode.TextEditor, DecorationCache>();
 
   // 1-1. 설정 조회
-  const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(`Mybatis`);
+  const getConfig = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration(`Mybatis-Booster`);
 
   // 1-2. 색상 데코레이션 생성
   const createType = (color: string | vscode.ThemeColor, bold = false): vscode.TextEditorDecorationType => vscode.window.createTextEditorDecorationType({
@@ -164,12 +171,29 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
     return ranges;
   };
 
+  // 1-7-1. XML 마크업 제외 범위 수집 (CDATA는 구분자만 제외해 내부 SQL을 하이라이트 대상으로 남김)
+  const collectMarkupRanges = (text: string): ExclusionRange[] => {
+    const ranges: ExclusionRange[] = [];
+    XML_MARKUP_REGEX.lastIndex = 0;
+    for (let match = XML_MARKUP_REGEX.exec(text); match; match = XML_MARKUP_REGEX.exec(text)) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (!match[0].startsWith(XML_CDATA_OPEN)) {
+        ranges.push({ end, start });
+        continue;
+      }
+      ranges.push({ "end": start + XML_CDATA_OPEN.length, start });
+      match[0].endsWith(XML_CDATA_CLOSE) && ranges.push({ end, "start": end - XML_CDATA_CLOSE.length });
+    }
+    return ranges;
+  };
+
   // 1-8. 그룹별 제외 범위 생성 (기본 패턴을 문서당 1회씩만 스캔 후 조합)
   const buildExclusionSets = (text: string, language: string): ExclusionSets => {
     const sqlComments = collectRanges(text, SQL_COMMENT_REGEX);
     const xmlComments = collectRanges(text, XML_COMMENT_REGEX);
     const sqlStrings = collectRanges(text, SQL_STRING_REGEX);
-    const xmlMarkups = language === `xml` ? collectRanges(text, XML_MARKUP_REGEX) : [];
+    const xmlMarkups = language === `xml` ? collectMarkupRanges(text) : [];
     return {
       "standard": mergeRanges([...sqlComments, ...xmlComments, ...xmlMarkups]),
       "nativeComment": mergeRanges(language === `sql` ? [...sqlStrings, ...xmlComments] : [...sqlStrings]),

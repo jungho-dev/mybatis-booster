@@ -6,7 +6,7 @@
 import { vscode } from "@exportLibs";
 
 const TLR024 = /^\s+/gm;
-const MAIN = `Mybatis`;
+const MAIN = `Mybatis-Booster`;
 const LOG_LEVEL_MAP = {
   "off": 0,
   "debug": 10,

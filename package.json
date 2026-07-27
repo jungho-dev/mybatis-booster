@@ -6,7 +6,7 @@
   "icon": "logo.webp",
   "license": "Apache-2.0",
   "main": "./out/extension.js",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "categories": [
     "Other"
   ],
@@ -25,7 +25,7 @@
   ],
   "contributes": {
     "outputChannels": [
-      "Mybatis"
+      "Mybatis-Booster"
     ],
     "snippets": [
       {
@@ -35,80 +35,80 @@
     ],
     "commands": [
       {
-        "command": "Mybatis.gotoxml",
+        "command": "Mybatis-Booster.gotoxml",
         "title": "Go to XML Mapper",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(references)"
       },
       {
-        "command": "Mybatis.gotojava",
+        "command": "Mybatis-Booster.gotojava",
         "title": "Go to Java Mapper",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(references)"
       },
       {
-        "command": "Mybatis.refreshmapper",
+        "command": "Mybatis-Booster.refreshmapper",
         "title": "Refresh Mappers",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(refresh)"
       },
       {
-        "command": "Mybatis.formatlog",
+        "command": "Mybatis-Booster.formatlog",
         "title": "Convert MyBatis Log to SQL",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(output)"
       },
       {
-        "command": "Mybatis.previewsql",
+        "command": "Mybatis-Booster.previewsql",
         "title": "Preview SQL from Statement",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(eye)"
       },
       {
-        "command": "Mybatis.gotologstatement",
+        "command": "Mybatis-Booster.gotologstatement",
         "title": "Go to Statement from Log",
-        "category": "Mybatis",
+        "category": "Mybatis-Booster",
         "icon": "$(search)"
       },
       {
-        "command": "Mybatis.openLogOutput",
+        "command": "Mybatis-Booster.openLogOutput",
         "title": "Open Log Output",
-        "category": "Mybatis"
+        "category": "Mybatis-Booster"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "Mybatis.gotoxml",
+          "command": "Mybatis-Booster.gotoxml",
           "when": "resourceLangId == java",
           "group": "navigation@1"
         },
         {
-          "command": "Mybatis.gotojava",
+          "command": "Mybatis-Booster.gotojava",
           "when": "resourceLangId == xml",
           "group": "navigation@1"
         },
         {
-          "command": "Mybatis.formatlog",
+          "command": "Mybatis-Booster.formatlog",
           "when": "editorHasSelection",
           "group": "navigation@2"
         },
         {
-          "command": "Mybatis.previewsql",
+          "command": "Mybatis-Booster.previewsql",
           "when": "resourceLangId == xml",
           "group": "navigation@3"
         },
         {
-          "command": "Mybatis.gotologstatement",
+          "command": "Mybatis-Booster.gotologstatement",
           "when": "editorHasSelection",
           "group": "navigation@4"
         }
       ]
     },
     "configuration": {
-      "title": "Mybatis",
+      "title": "Mybatis-Booster",
       "properties": {
-        "Mybatis.logLevel": {
+        "Mybatis-Booster.logLevel": {
           "type": "string",
           "scope": "window",
           "enum": [
@@ -121,58 +121,58 @@
           ],
           "default": "info"
         },
-        "Mybatis.sqlKeywordColor": {
+        "Mybatis-Booster.sqlKeywordColor": {
           "type": "string",
           "default": "#c586c0",
           "description": "Highlight color for SQL keywords in MyBatis XML mapper and SQL files"
         },
-        "Mybatis.sqlDangerColor": {
+        "Mybatis-Booster.sqlDangerColor": {
           "type": "string",
           "default": "#F44747",
           "description": "Highlight color for destructive SQL keywords"
         },
-        "Mybatis.sqlStringColor": {
+        "Mybatis-Booster.sqlStringColor": {
           "type": "string",
           "default": "#f4d4ae",
           "description": "Highlight color for SQL string literals"
         },
-        "Mybatis.sqlNumberColor": {
+        "Mybatis-Booster.sqlNumberColor": {
           "type": "string",
           "default": "#00FF00",
           "description": "Highlight color for SQL numeric literals"
         },
-        "Mybatis.sqlCommentColor": {
+        "Mybatis-Booster.sqlCommentColor": {
           "type": "string",
           "default": "#ffff00",
           "description": "Highlight color for SQL-native comments"
         },
-        "Mybatis.sqlInvalidCommentColor": {
+        "Mybatis-Booster.sqlInvalidCommentColor": {
           "type": "string",
           "default": "#5d9b5d",
           "description": "Highlight color for comments that do not belong to the current document language"
         },
-        "Mybatis.sqlHighlightEnabled": {
+        "Mybatis-Booster.sqlHighlightEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable SQL syntax highlighting in MyBatis XML mapper and SQL files"
         },
-        "Mybatis.maxDocumentLength": {
+        "Mybatis-Booster.maxDocumentLength": {
           "type": "number",
           "default": 300000,
           "minimum": 0,
           "description": "Skip syntax highlighting above this document length. Use 0 for no limit."
         },
-        "Mybatis.codeLensEnabled": {
+        "Mybatis-Booster.codeLensEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable Java and XML mapper navigation CodeLens"
         },
-        "Mybatis.languageFeaturesEnabled": {
+        "Mybatis-Booster.languageFeaturesEnabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable MyBatis go-to-definition, hover, XML completion, and document symbols"
         },
-        "Mybatis.searchExclude": {
+        "Mybatis-Booster.searchExclude": {
           "type": "array",
           "items": {
             "type": "string"
@@ -211,9 +211,9 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.1.1",
     "@types/vscode": "1.110.0",
-    "@vscode/test-electron": "^3.0.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
-    "concurrently": "^10.0.3",
+    "concurrently": "^10.0.4",
     "esbuild": "^0.28.1",
     "mocha": "^11.7.6",
     "ts-morph": "^28.0.0",

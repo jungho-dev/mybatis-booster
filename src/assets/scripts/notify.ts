@@ -5,7 +5,7 @@
 
 import { vscode } from "@exportLibs";
 
-const MAIN = `Mybatis`;
+const MAIN = `Mybatis-Booster`;
 const AT_CLS_MS = 1000;
 const LOG_CONFIG = {
   "debug": {
