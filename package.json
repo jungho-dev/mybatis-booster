@@ -6,7 +6,11 @@
   "icon": "logo.webp",
   "license": "Apache-2.0",
   "main": "./out/extension.js",
-  "version": "1.0.5",
+  "version": "1.0.6",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jungho-dev/mybatis-booster.git"
+  },
   "categories": [
     "Other"
   ],
