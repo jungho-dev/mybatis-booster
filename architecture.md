@@ -40,10 +40,12 @@ Generated files live in `out/` and are rebuilt by the VSIX tool path. They are n
 
 ```text
 XML: <mapper namespace="com.foo.BarMapper">
-  -> index key: file fsPath, value: namespace + statement ids/lines
-Java: package com.foo; interface BarMapper
+  -> index key: file fsPath, value: namespace + statement ids/lines/end lines
+Java: package com.foo; top-level interface BarMapper
   -> namespace = packageName + "." + interfaceName
-  -> workspace.findFiles("**/com/foo/BarMapper.java") resolves the Java side
+  -> javaIndex maps namespace -> { fsPath -> mapper }, so several source roots can
+     declare the same namespace without either side losing its counterpart
+  -> workspace.findFiles("**/com/foo/BarMapper.java") resolves an index miss
 ```
 
 Statement elements (`select`, `insert`, `update`, `delete`) map to Java methods by `id` equality.
@@ -52,13 +54,32 @@ final closing brace.
 Definition, completion, and outline providers use the same mapper index, so they stay aligned with
 CodeLens and file watcher refreshes.
 
+Pairing accuracy depends on three parse boundaries:
+
+* Java method collection stops at the top-level interface's closing brace, and members of nested
+  types are excluded, so declarations outside the mapper never register as statements.
+* Each method records its declaration span (leading annotations through the terminating `;` or
+  body brace) and each statement records its closing-tag line. Cursor-driven commands, hover, and
+  definition resolve a counterpart only inside that span.
+* `@Select`/`@Insert`/`@Update`/`@Delete` detection scans the whole annotation region back to the
+  previous member boundary, so annotations with nested parentheses such as
+  `@Results({ @Result(...) })` do not hide the SQL annotation.
+
+Nested `select` references from `<association>` and `<collection>` are kept in a reverse index keyed
+by `namespace.statementId`, so a statement referenced from another file is not reported as unused.
+
 ## Index And Watcher Model
 
-`MapperIndexService` scans `**/*.xml` minus `Mybatis-Booster.searchExclude` globs in batches of `50`,
-parsing only files whose text contains a `<mapper namespace>` root. A single `FileSystemWatcher`
-re-indexes changed files with a `200ms` per-path debounce. Open XML documents re-parse through
-`syncDoc` so dirty editors stay accurate. Java parses cache per document version in an LRU of
-`100` entries.
+`MapperIndexService` scans `**/*.xml` and `**/*.java` minus `Mybatis-Booster.searchExclude` globs
+with a concurrency cap of `32`, parsing only XML files whose text contains a `<mapper namespace>`
+root. Separate XML and Java `FileSystemWatcher` instances re-index changed files with a `200ms`
+per-path debounce. Open documents re-parse through `syncDoc` and `getJavaMapper` so dirty editors
+stay accurate, keyed by document version in a `WeakMap`.
+
+Because those two calls write the unsaved buffer's parse into the index, closing a document without
+saving would otherwise leave that buffer state in place. `onDidCloseTextDocument` therefore calls
+`reindexPath` to re-read the file from disk, which is what keeps a discarded edit from producing a
+phantom or missing counterpart.
 
 ## Log Conversion
 

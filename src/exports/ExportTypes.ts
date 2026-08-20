@@ -27,6 +27,7 @@ export interface XmlStatementType {
   id: string;
   tag: StatementTagType;
   line: number;
+  endLine: number;
   column: number;
   databaseId: string;
   bindings: XmlBindingType[];
@@ -61,6 +62,8 @@ export interface XmlMapperType {
 export interface JavaMethodType {
   name: string;
   line: number;
+  startLine: number;
+  endLine: number;
   paramNames: string[];
   paramCount: number;
   allParamsNamed: boolean;

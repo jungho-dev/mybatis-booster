@@ -23,8 +23,11 @@ export const MapperIndexService = () => {
   // 0. 변수 설정 ----------------------------------------------------------------------------
   const xmlIndex = new Map<string, XmlMapperType>();
   const namespaceIndex = new Map<string, Set<string>>();
-  const javaIndex = new Map<string, IndexedJavaMapper>();
+  // namespace 당 다중 소유 파일 허용 — 동일 인터페이스가 여러 소스 루트에 있어도 짝을 잃지 않음
+  const javaIndex = new Map<string, Map<string, IndexedJavaMapper>>();
   const javaPathIndex = new Map<string, string>();
+  // 중첩 select 참조 역인덱스: `namespace.statementId` -> 참조 보유 XML 경로 집합
+  const selectRefIndex = new Map<string, Set<string>>();
   const xmlDocCache = new WeakMap<vscode.TextDocument, DocCacheEntry<XmlMapperType>>();
   const javaDocCache = new WeakMap<vscode.TextDocument, DocCacheEntry<JavaMapperType>>();
   const decoder = new TextDecoder(`utf-8`);
@@ -81,13 +84,22 @@ export const MapperIndexService = () => {
     return excludeRegexes.some((regex) => regex.test(relative));
   };
 
-  // 1-4. XML 인덱스 등록/제거 (네임스페이스 역인덱스 동기화)
+  // 1-4. 중첩 select 참조 키 정규화 (비수식 refid 는 보유 mapper 의 namespace 기준)
+  const selectRefKey = (namespace: string, ref: string): string => ref.includes(`.`) ? ref : `${namespace}.${ref}`;
+
+  // 1-4-1. XML 인덱스 등록/제거 (네임스페이스/중첩 select 역인덱스 동기화)
   const removeXml = (fsPath: string): void => {
     const prev = xmlIndex.get(fsPath);
     if (prev) {
       const paths = namespaceIndex.get(prev.namespace);
       paths?.delete(fsPath);
       paths && paths.size === 0 && namespaceIndex.delete(prev.namespace);
+      for (const ref of prev.selectRefs) {
+        const key = selectRefKey(prev.namespace, ref);
+        const owners = selectRefIndex.get(key);
+        owners?.delete(fsPath);
+        owners && owners.size === 0 && selectRefIndex.delete(key);
+      }
     }
     xmlIndex.delete(fsPath);
   };
@@ -97,6 +109,12 @@ export const MapperIndexService = () => {
     const paths = namespaceIndex.get(mapper.namespace) ?? new Set<string>();
     paths.add(fsPath);
     namespaceIndex.set(mapper.namespace, paths);
+    for (const ref of mapper.selectRefs) {
+      const key = selectRefKey(mapper.namespace, ref);
+      const owners = selectRefIndex.get(key) ?? new Set<string>();
+      owners.add(fsPath);
+      selectRefIndex.set(key, owners);
+    }
   };
 
   // 1-5. 단일 XML 파일 인덱싱
@@ -111,16 +129,38 @@ export const MapperIndexService = () => {
     }
   };
 
-  // 1-6. Java mapper 인덱스 등록/제거
+  // 1-6. Java mapper 인덱스 등록/제거 (해당 경로 소유분만 제거 — 동일 namespace 타 파일 보존)
   const removeJava = (fsPath: string): void => {
     const namespace = javaPathIndex.get(fsPath);
-    namespace && javaIndex.delete(namespace);
+    if (namespace) {
+      const owners = javaIndex.get(namespace);
+      owners?.delete(fsPath);
+      owners && owners.size === 0 && javaIndex.delete(namespace);
+    }
     javaPathIndex.delete(fsPath);
   };
   const setJava = (uri: vscode.Uri, mapper: JavaMapperType): void => {
     const namespace = `${mapper.packageName}.${mapper.interfaceName}`;
-    javaIndex.set(namespace, { mapper, uri });
+    // interface/package 가 바뀐 경우 직전 namespace 등록분을 먼저 정리 (유령 짝 방지)
+    const previous = javaPathIndex.get(uri.fsPath);
+    previous && previous !== namespace && removeJava(uri.fsPath);
+    const owners = javaIndex.get(namespace) ?? new Map<string, IndexedJavaMapper>();
+    owners.set(uri.fsPath, { mapper, uri });
+    javaIndex.set(namespace, owners);
     javaPathIndex.set(uri.fsPath, namespace);
+  };
+
+  // 1-6-1. namespace 대표 Java mapper 선택 (@Mapper 우선, 그다음 경로 사전순 — 결과 고정)
+  const pickJavaOwner = (namespace: string): IndexedJavaMapper | undefined => {
+    const owners = javaIndex.get(namespace);
+    if (!owners || owners.size === 0) {
+      return undefined;
+    }
+    if (owners.size === 1) {
+      return owners.values().next().value;
+    }
+    const sorted = [...owners.values()].sort((left, right) => left.uri.fsPath.localeCompare(right.uri.fsPath));
+    return sorted.find((item) => item.mapper.hasMapperAnnotation) ?? sorted[0];
   };
 
   // 1-7. 단일 Java 파일 인덱싱
@@ -154,6 +194,7 @@ export const MapperIndexService = () => {
   const scan = async (): Promise<number> => {
     xmlIndex.clear();
     namespaceIndex.clear();
+    selectRefIndex.clear();
     javaIndex.clear();
     javaPathIndex.clear();
     const excludeGlob = getExcludeGlob();
@@ -189,7 +230,7 @@ export const MapperIndexService = () => {
     if (cached && cached.version === document.version) {
       if (cached.mapper) {
         const namespace = `${cached.mapper.packageName}.${cached.mapper.interfaceName}`;
-        javaIndex.get(namespace)?.mapper !== cached.mapper && setJava(document.uri, cached.mapper);
+        javaIndex.get(namespace)?.get(document.uri.fsPath)?.mapper !== cached.mapper && setJava(document.uri, cached.mapper);
       }
       return cached.mapper;
     }
@@ -198,6 +239,20 @@ export const MapperIndexService = () => {
     mapper && setJava(document.uri, mapper);
     javaDocCache.set(document, { mapper, "version": document.version });
     return mapper;
+  };
+
+  // 1-11-1. 파일 내용 기준 재인덱싱 (저장하지 않고 닫은 편집 버퍼가 인덱스에 잔존하지 않도록)
+  const reindexPath = async (uri: vscode.Uri): Promise<void> => {
+    // 제외 경로도 syncDoc/getJavaMapper 로 인덱싱될 수 있어 디스크 기준으로 되돌림
+    if (uri.scheme !== `file`) {
+      return;
+    }
+    const lower = uri.fsPath.toLowerCase();
+    if (lower.endsWith(`.xml`)) {
+      await indexFile(uri);
+      return;
+    }
+    lower.endsWith(`.java`) && await indexJavaFile(uri);
   };
 
   // 1-12. 경로/네임스페이스 조회
@@ -218,11 +273,14 @@ export const MapperIndexService = () => {
   // 1-13. 인터페이스 단순명으로 Java namespace 후보 조회 (namespace 오타 진단용)
   const findJavaBySimpleName = (interfaceName: string): string[] => {
     const namespaces: string[] = [];
-    for (const [namespace, indexed] of javaIndex) {
-      indexed.mapper.interfaceName === interfaceName && namespaces.push(namespace);
+    for (const [namespace, owners] of javaIndex) {
+      [...owners.values()].some((item) => item.mapper.interfaceName === interfaceName) && namespaces.push(namespace);
     }
     return namespaces;
   };
+
+  // 1-13-0. 중첩 select 참조 대상 여부 (교차 파일 참조 포함 — 거짓 미사용 진단 방지)
+  const hasSelectRef = (namespace: string, statementId: string): boolean => selectRefIndex.has(`${namespace}.${statementId}`);
 
   // 1-13-1. namespace 마지막 세그먼트로 XML mapper 조회 (로그 약층 로거명 역추적용)
   const findXmlBySimpleName = (simpleName: string): XmlMapperType[] => {
@@ -244,16 +302,26 @@ export const MapperIndexService = () => {
     return undefined;
   };
 
+  // 1-13-3. statement id 로 전체 mapper 탐색 (축약 로거명으로 단순명 역추적이 실패할 때 대체 경로)
+  const findStatementById = (statementId: string): Array<{ mapper: XmlMapperType; statement: XmlStatementType }> => {
+    const matches: Array<{ mapper: XmlMapperType; statement: XmlStatementType }> = [];
+    for (const mapper of xmlIndex.values()) {
+      const statement = mapper.statements.find((item) => item.id === statementId);
+      statement && matches.push({ mapper, statement });
+    }
+    return matches;
+  };
+
   // 1-14. 네임스페이스로 Java mapper 조회 (인덱스 우선, 미스 시 파일 검색)
   const findJavaByNamespace = async (namespace: string): Promise<IndexedJavaMapper | undefined> => {
-    const indexed = javaIndex.get(namespace);
+    const indexed = pickJavaOwner(namespace);
     if (indexed) {
       return indexed;
     }
     const relative = namespace.replace(/\./g, `/`);
     const uris = await vscode.workspace.findFiles(`**/${relative}.java`, getExcludeGlob(), 1);
     uris[0] && await indexJavaFile(uris[0]);
-    return javaIndex.get(namespace);
+    return pickJavaOwner(namespace);
   };
 
   // 1-15. XML/Java 변경 감시 (경로별 debounce, 제외 경로 무시)
@@ -297,10 +365,11 @@ export const MapperIndexService = () => {
     watchers = [];
     xmlIndex.clear();
     namespaceIndex.clear();
+    selectRefIndex.clear();
     javaIndex.clear();
     javaPathIndex.clear();
   };
 
   // 99. return -----------------------------------------------------------------------------
-  return { scan, syncDoc, getXmlByPath, findXmlByNamespace, findXmlBySimpleName, findStatementByNamespace, findJavaByNamespace, findJavaBySimpleName, getJavaMapper, watch, dispose };
+  return { scan, syncDoc, reindexPath, getXmlByPath, findXmlByNamespace, findXmlBySimpleName, findStatementByNamespace, findStatementById, hasSelectRef, findJavaByNamespace, findJavaBySimpleName, getJavaMapper, watch, dispose };
 };

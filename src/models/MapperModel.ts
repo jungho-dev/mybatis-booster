@@ -77,6 +77,13 @@ const blankXmlComments = (text: string): string => text.replace(XML_COMMENT_PATT
 // 1-4. 속성 매치의 값 시작 오프셋 (매치 끝 - 닫는 따옴표 - 값 길이)
 const attrValueOffset = (match: RegExpExecArray): number => match.index + match[0].length - 1 - match[1].length;
 
+// 1-4-1. 닫는 태그 오프셋 (태그명 경계 확인 — </select 가 </selectKey 오인 방지)
+const findCloseTagIndex = (text: string, tag: string, from: number): number => {
+  const regex = new RegExp(`</${tag}\\s*>`, `g`);
+  regex.lastIndex = Math.max(0, from);
+  return regex.exec(text)?.index ?? -1;
+};
+
 // 1-5. statement 본문 내 #{} 바인딩 수집
 const collectBindings = (scanText: string, bodyStart: number, bodyEnd: number, lineStarts: number[]): XmlBindingType[] => {
   const bindings: XmlBindingType[] = [];
@@ -144,7 +151,7 @@ export const parseXmlMapper = (fsPath: string, text: string): XmlMapperType | nu
     const tagEnd = scanText.indexOf(`>`, raw.index);
     const bodyStart = tagEnd < 0 ? limit : Math.min(tagEnd + 1, limit);
     const selfClosing = tagEnd > 0 && scanText[tagEnd - 1] === `/`;
-    const closeIndex = selfClosing ? bodyStart : scanText.indexOf(`</${raw.tag}`, bodyStart);
+    const closeIndex = selfClosing ? bodyStart : findCloseTagIndex(scanText, raw.tag, bodyStart);
     const bodyEnd = closeIndex < 0 ? limit : Math.min(closeIndex, limit);
     const openTag = scanText.slice(raw.index, bodyStart);
     const bodyEndSafe = Math.max(bodyStart, bodyEnd);
@@ -153,6 +160,8 @@ export const parseXmlMapper = (fsPath: string, text: string): XmlMapperType | nu
       "id": raw.id,
       "tag": raw.tag,
       ...offsetToPosition(lineStarts, raw.index),
+      // 커서 위치가 이 statement 소유인지 판정하기 위한 종료 라인 (닫는 태그 라인)
+      "endLine": offsetToPosition(lineStarts, Math.max(raw.index, bodyEndSafe)).line,
       "databaseId": DATABASE_ID_ATTR_PATTERN.exec(openTag)?.[1] ?? ``,
       "bindings": collectBindings(scanText, bodyStart, bodyEndSafe, lineStarts),
       "collections": statementVars.collections,
@@ -289,6 +298,30 @@ const skipBraceBlock = (text: string, openIndex: number): number => {
   return text.length;
 };
 
+// 2-0-3. 최상위 interface 선언 탐색 (중첩 타입/문자열 리터럴 오탐 방지)
+const findTopLevelInterface = (braceScanText: string): { index: number; name: string; bodyStart: number } | undefined => {
+  const regex = new RegExp(INTERFACE_PATTERN.source, `g`);
+  let cursor = 0;
+  let depth = 0;
+  for (let match = regex.exec(braceScanText); match; match = regex.exec(braceScanText)) {
+    while (cursor < match.index) {
+      const char = braceScanText[cursor];
+      if (char === `{`) {
+        depth += 1;
+      }
+      else if (char === `}`) {
+        depth -= 1;
+      }
+      cursor += 1;
+    }
+    const bodyStart = braceScanText.indexOf(`{`, match.index);
+    if (depth === 0 && bodyStart >= 0) {
+      return { "index": match.index, "name": match[1], bodyStart };
+    }
+  }
+  return undefined;
+};
+
 // 2-1. 메서드 파라미터 파싱 (@Param 이름, 특수 파라미터 제외)
 const parseMethodParams = (methodText: string, nameEnd: number): Pick<JavaMethodType, `paramNames` | `paramCount` | `allParamsNamed`> => {
   const unparsed = { "paramNames": [] as string[], "paramCount": 0, "allParamsNamed": false };
@@ -355,49 +388,90 @@ const parseMethodParams = (methodText: string, nameEnd: number): Pick<JavaMethod
   return { paramNames, paramCount, allParamsNamed };
 };
 
-// 2-2. Java mapper 인터페이스 파싱 (경량 정규식 기반, 주석 블랭킹 후 스캔)
+// 2-2. Java mapper 인터페이스 파싱 (최상위 interface 본문 한정, 주석/문자열 블랭킹 후 스캔)
 export const parseJavaMapper = (text: string): JavaMapperType | null => {
   const scanText = blankJavaComments(text);
-  const packageMatch = PACKAGE_PATTERN.exec(scanText);
-  const interfaceMatch = INTERFACE_PATTERN.exec(scanText);
-  if (!packageMatch?.[1] || !interfaceMatch?.[1]) {
-    return null;
-  }
-  const bodyStart = scanText.indexOf(`{`, interfaceMatch.index);
-  if (bodyStart < 0) {
+  const braceScanText = blankJavaStrings(scanText);
+  const packageMatch = PACKAGE_PATTERN.exec(braceScanText);
+  const declared = findTopLevelInterface(braceScanText);
+  if (!packageMatch?.[1] || !declared) {
     return null;
   }
   const lineStarts = buildLineStarts(text);
-  const body = scanText.slice(bodyStart);
-  const braceScanBody = blankJavaStrings(body);
-  const declText = scanText.slice(interfaceMatch.index, bodyStart);
+  const bodyStart = declared.bodyStart;
+  // 인터페이스 닫는 중괄호까지로 본문을 한정 — 파일 뒤쪽 타입의 메서드 오수집 방지
+  const bodyEnd = skipBraceBlock(braceScanText, bodyStart);
+  const body = scanText.slice(bodyStart, bodyEnd);
+  const braceScanBody = braceScanText.slice(bodyStart, bodyEnd);
+  const declText = scanText.slice(declared.index, bodyStart);
   const methods: JavaMethodType[] = [];
   const methodRegex = new RegExp(METHOD_PATTERN.source, `gd`);
+  // 멤버 경계(depth 1의 ; }) 와 중괄호 깊이를 단일 순차 스캔으로 추적
+  const boundaries = [0];
+  let scanCursor = 0;
+  let braceDepth = 0;
+  let parenDepth = 0;
+  const advanceTo = (offset: number): void => {
+    while (scanCursor < offset) {
+      const char = braceScanBody[scanCursor];
+      scanCursor += 1;
+      if (char === `(`) {
+        parenDepth += 1;
+        continue;
+      }
+      if (char === `)`) {
+        parenDepth -= 1;
+        continue;
+      }
+      if (parenDepth > 0) {
+        continue;
+      }
+      if (char === `{`) {
+        braceDepth += 1;
+        continue;
+      }
+      if (char === `}`) {
+        braceDepth -= 1;
+        braceDepth === 1 && boundaries.push(scanCursor - 1);
+        continue;
+      }
+      char === `;` && braceDepth === 1 && boundaries.push(scanCursor - 1);
+    }
+  };
   for (let match = methodRegex.exec(body); match; match = methodRegex.exec(body)) {
     const name = match[1];
     const hasBody = match[0].endsWith(`{`);
-    if (hasBody) {
-      // 본문 내부 문장(throw/위임 호출 등)을 메서드로 오인하지 않도록 중괄호 짝까지 스킵
-      methodRegex.lastIndex = skipBraceBlock(braceScanBody, methodRegex.lastIndex - 1);
-    }
-    if (JAVA_RESERVED.has(name)) {
-      continue;
-    }
     const nameStart = match.indices?.[1]?.[0] ?? match.index + match[0].lastIndexOf(name);
     const nameIndex = nameStart - match.index;
+    // 본문 내부 문장(throw/위임 호출 등)을 메서드로 오인하지 않도록 중괄호 짝까지 스킵
+    const declEnd = hasBody ? skipBraceBlock(braceScanBody, methodRegex.lastIndex - 1) : match.index + match[0].length;
+    if (hasBody) {
+      methodRegex.lastIndex = declEnd;
+    }
+    advanceTo(nameStart);
+    // depth 1이 아니면 중첩 타입 멤버이므로 mapper 메서드가 아님
+    if (braceDepth !== 1 || JAVA_RESERVED.has(name)) {
+      continue;
+    }
+    // 어노테이션 구간은 직전 멤버 경계까지 — 중첩 괄호 어노테이션에서도 @Select 유실 없음
+    const declStart = boundaries.at(-1) ?? 0;
+    const annotations = braceScanBody.slice(declStart + 1, nameStart);
+    const leading = annotations.length - annotations.trimStart().length;
     methods.push({
       name,
       "line": offsetToPosition(lineStarts, bodyStart + nameStart).line,
-      "hasSqlAnnotation": SQL_ANNOTATION_PATTERN.test(match[0].slice(0, nameIndex)),
+      "startLine": offsetToPosition(lineStarts, bodyStart + declStart + 1 + leading).line,
+      "endLine": offsetToPosition(lineStarts, bodyStart + Math.max(nameStart, declEnd - 1)).line,
+      "hasSqlAnnotation": SQL_ANNOTATION_PATTERN.test(annotations),
       hasBody,
       ...parseMethodParams(match[0], nameIndex + name.length),
     });
   }
   return {
     "packageName": packageMatch[1],
-    "interfaceName": interfaceMatch[1],
-    "interfaceLine": offsetToPosition(lineStarts, interfaceMatch.index).line,
-    "hasMapperAnnotation": ANNOTATION_PATTERN.test(scanText),
+    "interfaceName": declared.name,
+    "interfaceLine": offsetToPosition(lineStarts, declared.index).line,
+    "hasMapperAnnotation": ANNOTATION_PATTERN.test(braceScanText.slice(0, bodyStart)),
     "hasParent": /\bextends\b/.test(stripGenericSections(declText)),
     methods,
   };
@@ -423,24 +497,36 @@ export const findCallSiteAt = (lineText: string, character: number): JavaCallSit
   return undefined;
 };
 
-// 3-2. 리시버 식별자의 선언 타입 해석 (필드/파라미터/로컬 선언, Java 타입명 대문자 관례 기반)
-export const resolveReceiverType = (text: string, receiver: string): string | undefined => {
-  const declRegex = new RegExp(`\\b([A-Z][\\w$]*)(?:<[^;{}()=]*>)?\\s+${receiver}\\s*[;=,)]`);
-  return declRegex.exec(blankJavaComments(text))?.[1];
+// 3-2. 리시버 식별자의 선언 타입 해석 (호출 지점 직전 선언 우선 — 지역 변수 섀도잉 반영)
+export const resolveReceiverType = (text: string, receiver: string, beforeOffset?: number): string | undefined => {
+  const declRegex = new RegExp(`\\b([A-Z][\\w$]*)(?:<[^;{}()=]*>)?\\s+${receiver}\\s*[;=,)]`, `g`);
+  const scanText = blankJavaComments(text);
+  let first: string | undefined;
+  let nearest: string | undefined;
+  for (let match = declRegex.exec(scanText); match; match = declRegex.exec(scanText)) {
+    first = first ?? match[1];
+    if (beforeOffset === undefined || match.index >= beforeOffset) {
+      break;
+    }
+    nearest = match[1];
+  }
+  return nearest ?? first;
 };
 
 // 3-3. 타입 단순명 -> FQCN 후보 (명시 import > 동일 패키지 > 와일드카드 import 순)
 export const resolveTypeCandidates = (text: string, typeName: string): string[] => {
   const candidates: string[] = [];
-  const explicit = new RegExp(`import\\s+([\\w.]+)\\.${typeName}\\s*;`).exec(text)?.[1];
+  // 주석 처리된 import 를 후보로 올리지 않도록 블랭킹 후 스캔
+  const scanText = blankJavaComments(text);
+  const explicit = new RegExp(`import\\s+([\\w.]+)\\.${typeName}\\s*;`).exec(scanText)?.[1];
   explicit && candidates.push(`${explicit}.${typeName}`);
-  const packageName = PACKAGE_PATTERN.exec(text)?.[1];
+  const packageName = PACKAGE_PATTERN.exec(scanText)?.[1];
   packageName && candidates.push(`${packageName}.${typeName}`);
   const wildcardRegex = new RegExp(WILDCARD_IMPORT_PATTERN.source, `g`);
-  for (let match = wildcardRegex.exec(text); match; match = wildcardRegex.exec(text)) {
+  for (let match = wildcardRegex.exec(scanText); match; match = wildcardRegex.exec(scanText)) {
     candidates.push(`${match[1]}.${typeName}`);
   }
-  return candidates;
+  return [...new Set(candidates)];
 };
 
 // 4-1. 정규식 메타문자 이스케이프
@@ -461,7 +547,7 @@ export const extractStatementXml = (text: string, statementId: string, tag: Stat
   if (scanText[tagEnd - 1] === `/`) {
     return text.slice(match.index, tagEnd + 1);
   }
-  const closeIndex = scanText.indexOf(`</${tag}`, tagEnd + 1);
+  const closeIndex = findCloseTagIndex(scanText, tag, tagEnd + 1);
   if (closeIndex < 0) {
     return undefined;
   }
@@ -484,7 +570,7 @@ export const extractSqlFragment = (text: string, fragmentId: string): string | u
   if (scanText[tagEnd - 1] === `/`) {
     return ``;
   }
-  const closeIndex = scanText.indexOf(`</sql`, tagEnd + 1);
+  const closeIndex = findCloseTagIndex(scanText, `sql`, tagEnd + 1);
   return closeIndex < 0 ? undefined : text.slice(tagEnd + 1, closeIndex);
 };
 

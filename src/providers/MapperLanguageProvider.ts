@@ -28,21 +28,23 @@ export const MapperLanguageProvider = (indexService: MapperIndexServiceType) => 
   // 1-3. 파일 위치 생성
   const fileLocation = (fsPath: string, line: number): vscode.Location => new vscode.Location(vscode.Uri.file(fsPath), new vscode.Position(Math.max(0, line), 0));
 
-  // 1-4. 커서 라인 기준 Java 메서드 추정 (역방향 탐색, 배열 복사 없음)
+  // 1-4. 커서 라인 소유 Java 메서드 (선언 구간 밖이면 미해석 — 무관한 줄의 거짓 짝 방지)
   const findJavaMethod = (javaMapper: JavaMapperType, line: number): JavaMethodType | undefined => {
     for (let i = javaMapper.methods.length - 1; i >= 0; i--) {
-      if (javaMapper.methods[i].line <= line) {
-        return javaMapper.methods[i];
+      const method = javaMapper.methods[i];
+      if (method.startLine <= line) {
+        return line <= method.endLine ? method : undefined;
       }
     }
     return undefined;
   };
 
-  // 1-5. 커서 라인 기준 XML statement 추정 (역방향 탐색, 배열 복사 없음)
+  // 1-5. 커서 라인 소유 XML statement (statement 구간 밖이면 미해석)
   const findXmlStatement = (xmlMapper: XmlMapperType, line: number): XmlStatementType | undefined => {
     for (let i = xmlMapper.statements.length - 1; i >= 0; i--) {
-      if (xmlMapper.statements[i].line <= line) {
-        return xmlMapper.statements[i];
+      const statement = xmlMapper.statements[i];
+      if (statement.line <= line) {
+        return line <= statement.endLine ? statement : undefined;
       }
     }
     return undefined;
@@ -93,11 +95,12 @@ export const MapperLanguageProvider = (indexService: MapperIndexServiceType) => 
       return undefined;
     }
     const text = document.getText();
-    const typeName = resolveReceiverType(text, callSite.receiver);
+    // 호출 지점 오프셋을 함께 넘겨 같은 이름의 지역 선언이 필드를 가리는 경우까지 반영
+    const typeName = resolveReceiverType(text, callSite.receiver, document.offsetAt(position));
     if (!typeName) {
       return undefined;
     }
-    const namespaces = [...resolveTypeCandidates(text, typeName), ...indexService.findJavaBySimpleName(typeName)];
+    const namespaces = new Set([...resolveTypeCandidates(text, typeName), ...indexService.findJavaBySimpleName(typeName)]);
     for (const namespace of namespaces) {
       const xmlMappers = indexService.findXmlByNamespace(namespace);
       if (xmlMappers.length === 0) {

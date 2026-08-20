@@ -3,7 +3,7 @@
 import { vscode } from "@exportLibs";
 import { extractSqlFragment, extractStatementXml, findLogStatementRef, renderPreviewSql } from "@exportModels";
 import { logger, notify, showLogOutput } from "@exportScripts";
-import type { JavaMethodType, MapperDiagnosticProviderType, MapperIndexServiceType, MapperLensProviderType, SqlDecoProviderType, SqlLogServiceType, XmlMapperType, XmlStatementType } from "@exportTypes";
+import type { JavaMethodType, LogStatementRefType, MapperDiagnosticProviderType, MapperIndexServiceType, MapperLensProviderType, SqlDecoProviderType, SqlLogServiceType, XmlMapperType, XmlStatementType } from "@exportTypes";
 
 const REFID_VALUE_PATTERN = /\brefid\s*=\s*["']([^"']+)["']/g;
 
@@ -23,11 +23,11 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
   // 1-2. 메서드명으로 statement 태그 추정
   const guessTag = (name: string): string => /^(insert|add|save|create|register)/i.test(name) ? `insert` : /^(update|modify|change)/i.test(name) ? `update` : /^(delete|remove|drop|erase)/i.test(name) ? `delete` : `select`;
 
-  // 1-3. 커서 라인 기준 마지막 메서드/구문 탐색 (역방향, 배열 복사 없음)
+  // 1-3. 커서 라인이 소유한 메서드/구문 탐색 (선언 구간 밖이면 미해석 — 거짓 짝 방지)
   const findMethodAtLine = (methods: JavaMethodType[], line: number): JavaMethodType | undefined => {
     for (let i = methods.length - 1; i >= 0; i--) {
-      if (methods[i].line <= line) {
-        return methods[i];
+      if (methods[i].startLine <= line) {
+        return line <= methods[i].endLine ? methods[i] : undefined;
       }
     }
     return undefined;
@@ -35,7 +35,7 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
   const findStatementAtLine = (statements: XmlStatementType[], line: number): XmlStatementType | undefined => {
     for (let i = statements.length - 1; i >= 0; i--) {
       if (statements[i].line <= line) {
-        return statements[i];
+        return line <= statements[i].endLine ? statements[i] : undefined;
       }
     }
     return undefined;
@@ -102,9 +102,21 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
       return;
     }
     const ref = findLogStatementRef(source);
-    const origin = ref ? indexService.findXmlBySimpleName(ref.simpleName).find((mapper) => mapper.statements.some((item) => item.id === ref.methodId)) : undefined;
-    const header = origin && ref ? `-- ${origin.namespace}.${ref.methodId}\n` : ``;
+    const origin = ref ? resolveLogOrigin(ref) : undefined;
+    const header = origin ? `-- ${origin.mapper.namespace}.${origin.statement.id}\n` : ``;
     await logService.openAsDoc(header + logService.formatSql(sql));
+  };
+
+  // 2-3-0. 로그 참조 -> XML statement 해석 (단순명 우선, 축약 로거명은 유일 id 매칭으로 대체)
+  const resolveLogOrigin = (ref: LogStatementRefType): { mapper: XmlMapperType; statement: XmlStatementType } | undefined => {
+    for (const mapper of indexService.findXmlBySimpleName(ref.simpleName)) {
+      const statement = mapper.statements.find((item) => item.id === ref.methodId);
+      if (statement) {
+        return { mapper, statement };
+      }
+    }
+    const matches = indexService.findStatementById(ref.methodId);
+    return matches.length === 1 ? matches[0] : undefined;
   };
 
   // 2-3-1. 로그 선택/클립보드에서 원본 XML statement로 이동
@@ -117,16 +129,13 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
       await notify(`warn`, `gotologstatement - no mapper logger reference found near "Preparing:" line.`);
       return;
     }
-    for (const mapper of indexService.findXmlBySimpleName(ref.simpleName)) {
-      const statement = mapper.statements.find((item) => item.id === ref.methodId);
-      if (statement) {
-        logger(`debug`, `gotologstatement - ${mapper.namespace}.${ref.methodId}`);
-        // biome-ignore lint/performance/noAwaitInLoops: 첫 매칭에서 즉시 종료하는 순차 탐색임
-        await openLocation(mapper.fsPath, statement.line);
-        return;
-      }
+    const origin = resolveLogOrigin(ref);
+    if (!origin) {
+      await notify(`warn`, `gotologstatement - no XML statement found for ${ref.simpleName}.${ref.methodId}.`);
+      return;
     }
-    await notify(`warn`, `gotologstatement - no XML statement found for ${ref.simpleName}.${ref.methodId}.`);
+    logger(`debug`, `gotologstatement - ${origin.mapper.namespace}.${origin.statement.id}`);
+    await openLocation(origin.mapper.fsPath, origin.statement.line);
   };
 
   // 2-3-2. statement가 참조하는 fragment 본문 수집 (중첩 include 최대 5단계)

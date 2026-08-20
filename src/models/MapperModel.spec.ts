@@ -74,6 +74,21 @@ describe(`parseXmlMapper`, () => {
     expect(mapper?.testExprs.map((item) => item.value)).toEqual([`type == 'Y'`, `status == "ACTIVE"`]);
   });
 
+  test(`records the closing tag line as the statement end boundary`, () => {
+    const xml = `
+<mapper namespace="com.example.UserMapper">
+  <select id="findUser">
+    SELECT 1
+  </select>
+  <resultMap id="userMap" type="User"/>
+</mapper>`;
+
+    const statement = parseXmlMapper(`UserMapper.xml`, xml)?.statements[0];
+
+    expect(statement?.line).toBe(2);
+    expect(statement?.endLine).toBe(4);
+  });
+
   test(`collects nested select refs and databaseId variants`, () => {
     const xml = `
 <mapper namespace="com.example.OrderMapper">
@@ -327,6 +342,106 @@ public interface OrderMapper {
     expect(mapper?.methods[0]?.allParamsNamed).toBe(true);
   });
 
+  test(`stops method collection at the interface closing brace`, () => {
+    const java = `
+package com.example;
+
+public interface UserMapper {
+  int findUser(Long id);
+}
+
+interface HiddenHelper {
+  int hiddenMethod(Long id);
+}`;
+
+    const mapper = parseJavaMapper(java);
+
+    expect(mapper?.interfaceName).toBe(`UserMapper`);
+    expect(mapper?.methods.map((item) => item.name)).toEqual([`findUser`]);
+  });
+
+  test(`ignores members of types nested inside the interface`, () => {
+    const java = `
+package com.example;
+
+public interface OrderMapper {
+  int findOrder(Long id);
+
+  class Helper {
+    int helperMethod(Long id) {
+      return 0;
+    }
+  }
+
+  interface Callback {
+    void onDone(Long id);
+  }
+}`;
+
+    expect(parseJavaMapper(java)?.methods.map((item) => item.name)).toEqual([`findOrder`]);
+  });
+
+  test(`does not treat a string literal or a nested interface as the mapper`, () => {
+    const literal = `
+package com.example;
+
+public class UserService {
+  private static final String NOTE = "interface Ghost";
+
+  public int find(Long id) {
+    return 0;
+  }
+}`;
+    const nested = `
+package com.example;
+
+public class CallbackHolder {
+  interface Callback {
+    int onDone(Long id);
+  }
+}`;
+
+    expect(parseJavaMapper(literal)).toBeNull();
+    expect(parseJavaMapper(nested)).toBeNull();
+  });
+
+  test(`detects SQL annotations behind an annotation with nested parentheses`, () => {
+    const java = `
+package com.example;
+
+public interface TagMapper {
+  @Select("SELECT id, name FROM tag WHERE id = #{id}")
+  @Results({ @Result(column = "id", property = "id"), @Result(column = "name", property = "name") })
+  Tag findTag(@Param("id") Long id);
+
+  int insertTag(Tag tag);
+}`;
+
+    const mapper = parseJavaMapper(java);
+
+    expect(mapper?.methods.map((item) => item.name)).toEqual([`findTag`, `insertTag`]);
+    expect(mapper?.methods.map((item) => item.hasSqlAnnotation)).toEqual([true, false]);
+  });
+
+  test(`records the declaration span including leading annotations`, () => {
+    const java = `
+package com.example;
+
+public interface UserMapper {
+  @Select("SELECT 1")
+  int countUsers();
+
+  default int twice() {
+    return countUsers() * 2;
+  }
+}`;
+
+    const [countUsers, twice] = parseJavaMapper(java)?.methods ?? [];
+
+    expect([countUsers?.startLine, countUsers?.line, countUsers?.endLine]).toEqual([4, 5, 5]);
+    expect([twice?.startLine, twice?.line, twice?.endLine]).toEqual([7, 7, 9]);
+  });
+
   test(`does not treat a generic bound as interface inheritance`, () => {
     const java = `
 package com.example;
@@ -363,5 +478,36 @@ public class UserServiceImpl {
     expect(findCallSiteAt(line, 0)).toBeUndefined();
     expect(resolveReceiverType(java, `userMapper`)).toBe(`UserMapper`);
     expect(resolveTypeCandidates(java, `UserMapper`)).toEqual([`com.example.mapper.UserMapper`, `com.example.service.UserMapper`, `com.example.dto.UserMapper`]);
+  });
+
+  test(`prefers the declaration nearest above the call site`, () => {
+    const java = `
+package com.example.service;
+
+public class MixedService {
+  private final UserMapper repo;
+
+  public int viaLocal(Long id) {
+    OrderMapper repo = null;
+    return repo.selectOrder(id);
+  }
+}`;
+    const callOffset = java.indexOf(`repo.selectOrder`);
+
+    expect(resolveReceiverType(java, `repo`)).toBe(`UserMapper`);
+    expect(resolveReceiverType(java, `repo`, callOffset)).toBe(`OrderMapper`);
+  });
+
+  test(`ignores commented-out imports when building FQCN candidates`, () => {
+    const java = `
+package com.example.service;
+
+// import com.ghost.mapper.UserMapper;
+import com.example.mapper.UserMapper;
+
+public class UserServiceImpl {
+}`;
+
+    expect(resolveTypeCandidates(java, `UserMapper`)).toEqual([`com.example.mapper.UserMapper`, `com.example.service.UserMapper`]);
   });
 });

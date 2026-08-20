@@ -137,7 +137,17 @@ const setupListeners = (indexService: MapperIndexServiceType, lensProvider: Mapp
   });
 
   const closeListener = vscode.workspace.onDidCloseTextDocument((document) => {
-    (document.languageId === `xml` || document.languageId === `java`) && diagnosticProvider.clear(document);
+    if (document.languageId !== `xml` && document.languageId !== `java`) {
+      return;
+    }
+    diagnosticProvider.clear(document);
+    // 저장하지 않고 닫은 편집 버퍼 파싱 결과가 인덱스에 남아 짝 판정을 왜곡하지 않도록 디스크 기준 재인덱싱
+    indexService.reindexPath(document.uri).then(() => {
+      lensProvider.refresh();
+      diagnosticProvider.applyOpenDocuments();
+    }).catch((error) => {
+      logger(`error`, `close - reindex failed: ${error}`);
+    });
   });
 
   const timerCleanup: vscode.Disposable = {
