@@ -2,7 +2,7 @@
 
 import { vscode } from "@exportLibs";
 import { logger } from "@exportScripts";
-import type { JavaMapperType, MapperIndexServiceType, XmlMapperType, XmlStatementType } from "@exportTypes";
+import type { JavaMapperType, JavaMethodType, MapperIndexServiceType, XmlMapperType, XmlStatementType } from "@exportTypes";
 
 // ------------------------------------------------------------------------------
 // 1. Java/XML mapper CodeLens
@@ -49,26 +49,47 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
     return lenses;
   };
 
-  // 1-4. XML mapper 문서에 Java 점프 렌즈 생성
-  const buildXmlLenses = (xmlMapper: XmlMapperType, javaMapper: JavaMapperType, javaPath: string): vscode.CodeLens[] => {
-    const methodsByName = new Map(javaMapper.methods.map((method) => [method.name, method]));
+  // 1-4. XML statement 렌즈 명령 결정
+  // - 짝 메서드 > 메서드 생성 > SQL 미리보기 순으로 내려감
+  // - javaPath 가 빈 값이면 Java 짝이 없는 mapper 이므로 생성 명령을 걸 대상이 없음
+  const xmlStatementCommand = (xmlMapper: XmlMapperType, statement: XmlStatementType, method: JavaMethodType | undefined, javaPath: string): vscode.Command => {
+    if (method) {
+      return {
+        "command": `Mybatis-Booster.openlocation`,
+        "title": `$(arrow-right) Go to Java Method`,
+        "arguments": [javaPath, method.line],
+      };
+    }
+    if (javaPath) {
+      return {
+        "command": `Mybatis-Booster.createjavamethod`,
+        "title": `$(add) Create Java method`,
+        "arguments": [javaPath, statement.id, statement.tag],
+      };
+    }
+    return {
+      "command": `Mybatis-Booster.previewsql`,
+      "title": `$(eye) Preview SQL`,
+      "arguments": [xmlMapper.fsPath, statement.id],
+    };
+  };
+
+  // 1-5. XML mapper 문서에 Java 점프 렌즈 생성
+  // - namespace 가 Java FQCN 이 아닌 레거시 mapper 도 렌즈를 유지함
+  const buildXmlLenses = (xmlMapper: XmlMapperType, javaMapper: JavaMapperType | null, javaPath: string): vscode.CodeLens[] => {
+    const methodsByName = new Map<string, JavaMethodType>((javaMapper?.methods ?? []).map((method) => [method.name, method]));
     const lenses: vscode.CodeLens[] = [];
-    lenses.push(new vscode.CodeLens(lineRange(xmlMapper.namespaceLine), {
-      "command": `Mybatis-Booster.openlocation`,
-      "title": `$(arrow-right) Go to Java Mapper`,
-      "arguments": [javaPath, javaMapper.interfaceLine],
-    }));
+    lenses.push(new vscode.CodeLens(lineRange(xmlMapper.namespaceLine), javaMapper ? {
+          "command": `Mybatis-Booster.openlocation`,
+          "title": `$(arrow-right) Go to Java Mapper`,
+          "arguments": [javaPath, javaMapper.interfaceLine],
+        } : {
+          // 빈 command 는 클릭 불가 라벨로 표시됨
+          "command": ``,
+          "title": `$(file-code) XML-only mapper`,
+        }));
     for (const statement of xmlMapper.statements) {
-      const method = methodsByName.get(statement.id);
-      lenses.push(new vscode.CodeLens(lineRange(statement.line), method ? {
-            "command": `Mybatis-Booster.openlocation`,
-            "title": `$(arrow-right) Go to Java Method`,
-            "arguments": [javaPath, method.line],
-          } : {
-            "command": `Mybatis-Booster.createjavamethod`,
-            "title": `$(add) Create Java method`,
-            "arguments": [javaPath, statement.id, statement.tag],
-          }));
+      lenses.push(new vscode.CodeLens(lineRange(statement.line), xmlStatementCommand(xmlMapper, statement, methodsByName.get(statement.id), javaPath)));
     }
     return lenses;
   };
@@ -106,11 +127,8 @@ export const MapperLensProvider = (indexService: MapperIndexServiceType) => {
         return [];
       }
       const indexed = await indexService.findJavaByNamespace(xmlMapper.namespace);
-      if (!indexed) {
-        return [];
-      }
-      logger(`debug`, `xmlLens - ${xmlMapper.namespace} -> ${indexed.uri.fsPath}`);
-      return buildXmlLenses(xmlMapper, indexed.mapper, indexed.uri.fsPath);
+      logger(`debug`, `xmlLens - ${xmlMapper.namespace} -> ${indexed?.uri.fsPath ?? `(no java mapper)`}`);
+      return buildXmlLenses(xmlMapper, indexed?.mapper ?? null, indexed?.uri.fsPath ?? ``);
     },
   };
 

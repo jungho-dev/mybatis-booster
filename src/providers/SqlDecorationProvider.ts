@@ -110,7 +110,7 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
     ];
     sqlGroups = [
       {
-        "decorationType": createType(config.get<string>(`sqlCommentColor`, `#ffff00`)),
+        "decorationType": createType(config.get<string>(`sqlCommentColor`, `#fffb90e8`)),
         "exclusionKind": `nativeComment`,
         "pattern": new RegExp(SQL_COMMENT_PATTERN, `g`),
         "useExclusions": true,
@@ -124,7 +124,7 @@ export const SqlDecorationProvider = (indexService: MapperIndexServiceType) => {
     ];
     xmlGroups = [
       {
-        "decorationType": createType(config.get<string>(`sqlCommentColor`, `#ffff00`)),
+        "decorationType": createType(config.get<string>(`sqlCommentColor`, `#fffb90e8`)),
         "exclusionKind": `nativeComment`,
         "pattern": new RegExp(XML_COMMENT_PATTERN, `g`),
         "useExclusions": true,

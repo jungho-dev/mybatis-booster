@@ -192,24 +192,26 @@ export const MybatisCommand = (indexService: MapperIndexServiceType, logService:
     return fragments;
   };
 
-  // 2-3-3. 커서 statement의 동적 태그를 전개해 SQL 미리보기 열기
-  const previewSql = async (): Promise<void> => {
+  // 2-3-3. statement의 동적 태그를 전개해 SQL 미리보기 열기
+  // - 인자가 없으면 활성 편집기 커서 기준, 있으면 CodeLens 가 지정한 statement 기준
+  const previewSql = async (fsPath?: string, statementId?: string): Promise<void> => {
     const editor = vscode.window.activeTextEditor;
-    if (editor?.document.languageId !== `xml`) {
+    const document = fsPath ? await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath)) : editor?.document;
+    if (document?.languageId !== `xml`) {
       await notify(`warn`, `previewsql - requires an active XML editor.`);
       return;
     }
-    const xmlMapper = indexService.syncDoc(editor.document);
+    const xmlMapper = indexService.syncDoc(document);
     if (!xmlMapper) {
       await notify(`warn`, `previewsql - not a valid MyBatis XML mapper.`);
       return;
     }
-    const statement = findStatementAtLine(xmlMapper.statements, editor.selection.active.line);
+    const statement = statementId ? xmlMapper.statements.find((item) => item.id === statementId) : findStatementAtLine(xmlMapper.statements, editor?.selection.active.line ?? -1);
     if (!statement) {
       await notify(`warn`, `previewsql - place the cursor inside a statement.`);
       return;
     }
-    const statementXml = extractStatementXml(editor.document.getText(), statement.id, statement.tag);
+    const statementXml = extractStatementXml(document.getText(), statement.id, statement.tag);
     if (!statementXml) {
       await notify(`warn`, `previewsql - could not extract <${statement.tag} id="${statement.id}">.`);
       return;
