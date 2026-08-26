@@ -1,7 +1,7 @@
 // exports/ExportTypes.ts
 
 import type { MybatisCommand } from "@exportCommands";
-import type { MapperDiagnosticProvider, MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
+import type { MapperCodeActionProvider, MapperDiagnosticProvider, MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
 import type { MapperIndexService, SqlLogService } from "@exportServices";
 
 // XML statement 태그 ---------------------------------------------------------------
@@ -30,9 +30,16 @@ export interface XmlStatementType {
   endLine: number;
   column: number;
   databaseId: string;
+  hasResult: boolean;
+  hasWhere: boolean;
   bindings: XmlBindingType[];
   collections: XmlBindingType[];
   localVars: string[];
+}
+export interface XmlUnescapedLtType {
+  line: number;
+  column: number;
+  length: number;
 }
 export interface XmlTestExprType {
   value: string;
@@ -91,6 +98,7 @@ export interface JavaMapperType {
 export type MybatisCommandType = ReturnType<typeof MybatisCommand>;
 
 // providers ----------------------------------------------------------------------
+export type MapperCodeActionProviderType = ReturnType<typeof MapperCodeActionProvider>;
 export type MapperDiagnosticProviderType = ReturnType<typeof MapperDiagnosticProvider>;
 export type MapperLanguageProviderType = ReturnType<typeof MapperLanguageProvider>;
 export type MapperLensProviderType = ReturnType<typeof MapperLensProvider>;

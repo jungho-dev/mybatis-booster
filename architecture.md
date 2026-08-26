@@ -3,11 +3,12 @@
 ## Runtime Surface
 
 ```text
-package.json activationEvents (onLanguage:java, onLanguage:xml)
+package.json activationEvents (onLanguage:java, onLanguage:xml, onLanguage:sql)
   -> src/extension.ts activate(context)
   -> MapperIndexService()
-  -> MapperLensProvider(indexService) + MapperLanguageProvider(indexService) + SqlDecorationProvider(indexService)
-  -> MybatisCommand(indexService, sqlLogService, lensProvider, decorationProvider)
+  -> MapperLensProvider + MapperLanguageProvider + MapperDiagnosticProvider
+     + MapperCodeActionProvider + SqlDecorationProvider (each over indexService)
+  -> MybatisCommand(indexService, logService, lensProvider, diagnosticProvider, decoProvider)
 ```
 
 `src/extension.ts` owns activation, output logging setup, provider registration, the XML file
@@ -20,14 +21,16 @@ src/
 |-- commands/
 |   `-- MybatisCommand.ts           command registration, goto/create/format-log actions
 |-- providers/
-|   |-- MapperLanguageProvider.ts   definition, hover, XML completion, and XML symbols
+|   |-- MapperLanguageProvider.ts   definition, hover (with rendered SQL), XML completion, symbols
 |   |-- MapperLensProvider.ts       Java and XML CodeLens builders
-|   `-- SqlDecorationProvider.ts    SQL syntax decoration for XML mapper and SQL editors
+|   |-- MapperDiagnosticProvider.ts XML and Java mapper consistency diagnostics
+|   |-- MapperCodeActionProvider.ts Quick Fixes for diagnostics
+|   `-- SqlDecorationProvider.ts    SQL syntax decoration for XML mapper, SQL, and Java editors
 |-- services/
 |   |-- MapperIndexService.ts       XML mapper index, Java parse cache, file watcher
-|   `-- SqlLogService.ts            Preparing/Parameters log parsing and SQL formatting
+|   `-- SqlLogService.ts            log-to-SQL orchestration and SQL clause formatting
 |-- models/
-|   `-- MapperModel.ts              regex-based XML and Java mapper parsers
+|   `-- MapperModel.ts              regex XML/Java parsers, log conversion, SQL preview render
 |-- assets/
 |   |-- scripts/                    logger, notify, LRU cache, SQL keyword list
 |   `-- types/                      ambient path aliases
@@ -68,6 +71,18 @@ Pairing accuracy depends on three parse boundaries:
 Nested `select` references from `<association>` and `<collection>` are kept in a reverse index keyed
 by `namespace.statementId`, so a statement referenced from another file is not reported as unused.
 
+## Diagnostics And Quick Fixes
+
+`MapperDiagnosticProvider` runs over open XML and Java mapper documents. XML checks cover duplicate ids,
+unknown `refid`/`resultMap`/`extends`, OGNL char literals, unused statements, unknown `#{}` bindings, namespace
+mismatch, missing `WHERE` on `update`/`delete`, `select` without a result, and unescaped `<`. Java checks cover
+missing statements and overloaded methods. `Mybatis-Booster.diagnosticsEnabled` gates the whole set, and
+`Mybatis-Booster.disabledDiagnosticCodes` suppresses individual codes.
+
+`MapperCodeActionProvider` maps a subset of those codes to Quick Fixes: create the missing XML statement or Java
+method, replace a mismatched namespace, and convert an OGNL char literal to a string literal. The create actions
+reuse the same commands as the CodeLens create stubs, so both paths insert identical text.
+
 ## Index And Watcher Model
 
 `MapperIndexService` scans `**/*.xml` and `**/*.java` minus `Mybatis-Booster.searchExclude` globs
@@ -86,8 +101,9 @@ phantom or missing counterpart.
 ```text
 "Preparing: SELECT * FROM user WHERE id = ?"
 "Parameters: 7(Integer), lee(String)"
-  -> ? placeholders filled in order
+  -> ? placeholders filled in order, skipping ? inside string literals
   -> numeric wrapper types stay raw, other values quoted, null becomes NULL
+  -> multiple Preparing/Parameters pairs convert into separate statements
   -> result opens as an untitled SQL document
 ```
 

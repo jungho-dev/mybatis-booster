@@ -1,9 +1,11 @@
 // providers/MapperLanguageProvider.ts
 
 import { vscode } from "@exportLibs";
-import { findCallSiteAt, resolveReceiverType, resolveTypeCandidates } from "@exportModels";
+import { extractSqlFragment, extractStatementXml, findCallSiteAt, renderPreviewSql, resolveReceiverType, resolveTypeCandidates } from "@exportModels";
 import { logger } from "@exportScripts";
-import type { JavaMapperType, JavaMethodType, MapperIndexServiceType, XmlMapperType, XmlNamedElementType, XmlStatementType } from "@exportTypes";
+import type { JavaMapperType, JavaMethodType, MapperIndexServiceType, StatementTagType, XmlMapperType, XmlNamedElementType, XmlStatementType } from "@exportTypes";
+
+const HOVER_REFID_PATTERN = /\brefid\s*=\s*["']([^"']+)["']/g;
 
 const REFERENCE_ATTR_PATTERN = /\b(refid|resultMap|extends)\s*=\s*["']([^"']*)["']/g;
 const BINDING_PREFIX_PATTERN = /#\{[\w$]*$/;
@@ -165,6 +167,24 @@ export const MapperLanguageProvider = (indexService: MapperIndexServiceType) => 
     },
   };
 
+  // 1-9. statement 원문 -> 미리보기 SQL 렌더 (Hover 표시용, 같은 문서 fragment 만 전개)
+  const renderStatementSql = async (fsPath: string, statementId: string, tag: StatementTagType): Promise<string | undefined> => {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
+    const text = document.getText();
+    const statementXml = extractStatementXml(text, statementId, tag);
+    if (!statementXml) {
+      return undefined;
+    }
+    const fragments = new Map<string, string>();
+    const regex = new RegExp(HOVER_REFID_PATTERN.source, `g`);
+    for (let match = regex.exec(statementXml); match; match = regex.exec(statementXml)) {
+      const body = extractSqlFragment(text, match[1]) ?? extractSqlFragment(text, match[1].split(`.`).at(-1) ?? match[1]);
+      body !== undefined && fragments.set(match[1], body);
+    }
+    const sql = renderPreviewSql(statementXml, fragments);
+    return sql || undefined;
+  };
+
   // 2-4. Java/XML 매핑 Hover
   const hoverProvider: vscode.HoverProvider = {
     "provideHover": async (document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Hover | undefined> => {
@@ -183,9 +203,15 @@ export const MapperLanguageProvider = (indexService: MapperIndexServiceType) => 
         }
         const namespace = `${javaMapper.packageName}.${javaMapper.interfaceName}`;
         const method = findJavaMethod(javaMapper, position.line);
-        const statement = method ? indexService.findStatementByNamespace(namespace, method.name)?.statement : undefined;
-        const text = statement ? `MyBatis XML: \`<${statement.tag} id="${statement.id}">\`` : `MyBatis namespace: \`${namespace}\``;
-        return new vscode.Hover(text);
+        const found = method ? indexService.findStatementByNamespace(namespace, method.name) : undefined;
+        if (!found) {
+          return new vscode.Hover(`MyBatis namespace: \`${namespace}\``);
+        }
+        // 매핑된 statement 태그 헤더에 렌더된 SQL 코드블록을 덧붙여 Java 파일에서 본문 확인
+        const markdown = new vscode.MarkdownString(`MyBatis XML: \`<${found.statement.tag} id="${found.statement.id}">\``);
+        const sql = await renderStatementSql(found.mapper.fsPath, found.statement.id, found.statement.tag);
+        sql && markdown.appendCodeblock(sql, `sql`);
+        return new vscode.Hover(markdown);
       }
       const xmlMapper = indexService.syncDoc(document);
       if (!xmlMapper) {

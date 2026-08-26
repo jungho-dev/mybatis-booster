@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractSqlFragment, extractStatementXml, findCallSiteAt, findLogStatementRef, parseJavaMapper, parseXmlMapper, renderPreviewSql, resolveReceiverType, resolveTypeCandidates, splitLogParamTokens } from "./MapperModel";
+import { convertMybatisLog, extractSqlFragment, extractStatementXml, findCallSiteAt, findLogStatementRef, findUnescapedLt, parseJavaMapper, parseXmlMapper, renderPreviewSql, resolveReceiverType, resolveTypeCandidates, splitLogParamTokens } from "./MapperModel";
 
 // 1. XML mapper 파싱 -------------------------------------------------------------------------
 describe(`parseXmlMapper`, () => {
@@ -509,5 +509,80 @@ public class UserServiceImpl {
 }`;
 
     expect(resolveTypeCandidates(java, `UserMapper`)).toEqual([`com.example.mapper.UserMapper`, `com.example.service.UserMapper`]);
+  });
+});
+
+// 4. 이스케이프 누락 '<' 탐지 -------------------------------------------------
+describe(`findUnescapedLt`, () => {
+  test(`flags comparison '<' outside tags, CDATA, and comments`, () => {
+    const xml = `
+<mapper namespace="com.example.M">
+  <select id="a" resultType="int">
+    SELECT * FROM t WHERE a < 10 AND b <= 20
+  </select>
+  <select id="b" resultType="int">
+    <![CDATA[ SELECT * FROM t WHERE a < 10 ]]>
+    <!-- a < b in a comment -->
+    SELECT 1
+  </select>
+</mapper>`;
+
+    const hits = findUnescapedLt(xml);
+
+    expect(hits.length).toBe(2);
+    expect(hits.every((hit) => hit.line === 3)).toBe(true);
+  });
+
+  test(`does not flag well-formed tags`, () => {
+    const xml = `<mapper namespace="com.example.M"><select id="a" resultType="int">SELECT 1</select></mapper>`;
+
+    expect(findUnescapedLt(xml)).toEqual([]);
+  });
+});
+
+// 5. statement 결과/필터 플래그 -----------------------------------------------
+describe(`parseXmlMapper statement flags`, () => {
+  test(`records hasResult and hasWhere`, () => {
+    const xml = `
+<mapper namespace="com.example.M">
+  <select id="withResult" resultType="int">SELECT 1</select>
+  <select id="noResult">SELECT 1</select>
+  <update id="withWhere">UPDATE t SET a = 1 WHERE id = #{id}</update>
+  <delete id="noWhere">DELETE FROM t</delete>
+  <update id="dynamicWhere">UPDATE t SET a = 1 <where>id = #{id}</where></update>
+</mapper>`;
+
+    const mapper = parseXmlMapper(`M.xml`, xml);
+    const byId = new Map(mapper?.statements.map((statement) => [statement.id, statement]));
+
+    expect(byId.get(`withResult`)?.hasResult).toBe(true);
+    expect(byId.get(`noResult`)?.hasResult).toBe(false);
+    expect(byId.get(`withWhere`)?.hasWhere).toBe(true);
+    expect(byId.get(`noWhere`)?.hasWhere).toBe(false);
+    expect(byId.get(`dynamicWhere`)?.hasWhere).toBe(true);
+  });
+});
+
+// 6. 로그 -> SQL 변환 ---------------------------------------------------------
+describe(`convertMybatisLog`, () => {
+  test(`binds parameters and skips '?' inside string literals`, () => {
+    const log = `Preparing: SELECT '?' AS q, name FROM user WHERE id = ? AND type = ?\nParameters: 7(Integer), admin(String)`;
+
+    expect(convertMybatisLog(log)).toBe(`SELECT '?' AS q, name FROM user WHERE id = 7 AND type = 'admin'`);
+  });
+
+  test(`converts multiple Preparing/Parameters pairs`, () => {
+    const log = [
+      `Preparing: SELECT * FROM a WHERE id = ?`,
+      `Parameters: 1(Integer)`,
+      `Preparing: SELECT * FROM b WHERE code = ?`,
+      `Parameters: x(String)`,
+    ].join(`\n`);
+
+    expect(convertMybatisLog(log)).toBe(`SELECT * FROM a WHERE id = 1;\n\nSELECT * FROM b WHERE code = 'x'`);
+  });
+
+  test(`returns null when no Preparing line exists`, () => {
+    expect(convertMybatisLog(`no sql here`)).toBeNull();
   });
 });

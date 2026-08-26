@@ -6,7 +6,7 @@
   "icon": "logo.webp",
   "license": "Apache-2.0",
   "main": "./out/extension.js",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/jungho-dev/mybatis-booster.git"
@@ -175,6 +175,32 @@
           "type": "boolean",
           "default": true,
           "description": "Enable MyBatis go-to-definition, hover, XML completion, and document symbols"
+        },
+        "Mybatis-Booster.diagnosticsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable MyBatis mapper diagnostics (missing/unused/duplicate statements, unknown references and bindings, missing WHERE, unescaped '<', and more)"
+        },
+        "Mybatis-Booster.disabledDiagnosticCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "missing-mybatis-statement",
+              "unused-mybatis-statement",
+              "duplicate-mybatis-id",
+              "unknown-mybatis-reference",
+              "unknown-mybatis-binding",
+              "mybatis-ognl-char-literal",
+              "mybatis-namespace-mismatch",
+              "mybatis-missing-where",
+              "mybatis-select-no-result",
+              "mybatis-unescaped-lt",
+              "mybatis-overloaded-method"
+            ]
+          },
+          "default": [],
+          "description": "Diagnostic codes to suppress while diagnostics remain enabled"
         },
         "Mybatis-Booster.searchExclude": {
           "type": "array",

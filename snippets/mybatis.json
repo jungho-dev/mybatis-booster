@@ -174,5 +174,47 @@
       "</where>"
     ],
     "description": "Create a where wrapper with a conditional filter"
+  },
+  "mybatis insert batch": {
+    "prefix": "insertBatch",
+    "body": [
+      "<insert id=\"$1\" parameterType=\"java.util.List\">",
+      "\tINSERT INTO $2 ($3)",
+      "\tVALUES",
+      "\t<foreach collection=\"list\" item=\"item\" separator=\",\">",
+      "\t\t(#{item.$4})",
+      "\t</foreach>",
+      "</insert>"
+    ],
+    "description": "Create a batch insert with foreach VALUES"
+  },
+  "mybatis insert generated key": {
+    "prefix": "insertKey",
+    "body": [
+      "<insert id=\"$1\" parameterType=\"$2\" useGeneratedKeys=\"true\" keyProperty=\"${3:id}\">",
+      "\t$0",
+      "</insert>"
+    ],
+    "description": "Create an insert that returns the generated key"
+  },
+  "mybatis association": {
+    "prefix": "association",
+    "body": [
+      "<association property=\"$1\" javaType=\"$2\">",
+      "\t<id column=\"$3\" property=\"$4\"/>",
+      "\t<result column=\"$5\" property=\"$6\"/>",
+      "</association>"
+    ],
+    "description": "Create a resultMap association (has-one)"
+  },
+  "mybatis collection": {
+    "prefix": "collection",
+    "body": [
+      "<collection property=\"$1\" ofType=\"$2\">",
+      "\t<id column=\"$3\" property=\"$4\"/>",
+      "\t<result column=\"$5\" property=\"$6\"/>",
+      "</collection>"
+    ],
+    "description": "Create a resultMap collection (has-many)"
   }
 }

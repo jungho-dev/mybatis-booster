@@ -1,4 +1,4 @@
 // exports/ExportModels.ts
 
 // -------------------------------------------------------------------------------
-export { extractSqlFragment, extractStatementXml, findCallSiteAt, findLogStatementRef, parseJavaMapper, parseXmlMapper, renderPreviewSql, resolveReceiverType, resolveTypeCandidates, splitLogParamTokens } from "@models/MapperModel";
+export { convertMybatisLog, extractSqlFragment, extractStatementXml, findCallSiteAt, findLogStatementRef, findUnescapedLt, parseJavaMapper, parseXmlMapper, renderPreviewSql, resolveReceiverType, resolveTypeCandidates, splitLogParamTokens } from "@models/MapperModel";

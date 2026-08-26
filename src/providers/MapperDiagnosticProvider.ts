@@ -1,8 +1,9 @@
 // providers/MapperDiagnosticProvider.ts
 
 import { vscode } from "@exportLibs";
+import { findUnescapedLt } from "@exportModels";
 import { logger } from "@exportScripts";
-import type { JavaMapperType, MapperIndexServiceType, XmlMapperType, XmlReferenceType } from "@exportTypes";
+import type { JavaMapperType, JavaMethodType, MapperIndexServiceType, XmlMapperType, XmlReferenceType } from "@exportTypes";
 
 const DIAGNOSTIC_SOURCE = `Mybatis`;
 const PARAM_INDEX_PATTERN = /^(?:param|arg)\d+$/;
@@ -32,12 +33,22 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
   // 1-1. 진단 활성화 여부
   const isEnabled = (): boolean => vscode.workspace.getConfiguration(`Mybatis-Booster`).get<boolean>(`languageFeaturesEnabled`, true);
 
-  // 1-2. 진단 생성 헬퍼
-  const buildDiagnostic = (range: vscode.Range, message: string, code: string): vscode.Diagnostic => {
-    const diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Warning);
+  // 1-2. 진단 생성 헬퍼 (기본 severity 는 Warning, 파싱 실패급은 Error 로 승격)
+  const buildDiagnostic = (range: vscode.Range, message: string, code: string, severity: vscode.DiagnosticSeverity = vscode.DiagnosticSeverity.Warning): vscode.Diagnostic => {
+    const diagnostic = new vscode.Diagnostic(range, message, severity);
     diagnostic.source = DIAGNOSTIC_SOURCE;
     diagnostic.code = code;
     return diagnostic;
+  };
+
+  // 1-2-1. 진단 코드 필터 (diagnosticsEnabled=false 면 전체 억제, disabledDiagnosticCodes 는 코드 제외)
+  const filterEnabled = (diagnostics: vscode.Diagnostic[]): vscode.Diagnostic[] => {
+    const config = vscode.workspace.getConfiguration(`Mybatis-Booster`);
+    if (!config.get<boolean>(`diagnosticsEnabled`, true)) {
+      return [];
+    }
+    const disabled = new Set(config.get<string[]>(`disabledDiagnosticCodes`, []));
+    return disabled.size === 0 ? diagnostics : diagnostics.filter((item) => !disabled.has(String(item.code)));
   };
 
   // 1-3. 요소 시작 라인 range 생성
@@ -76,6 +87,30 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
       `Missing MyBatis statement: no XML statement with id '${method.name}' found.`,
       `missing-mybatis-statement`,
     ));
+  };
+
+  // 2-1-2. 오버로드 메서드 진단 (MyBatis 는 메서드명으로 매핑해 동명 오버로드를 구분 못 함)
+  const buildOverloadedDiagnostics = (document: vscode.TextDocument, javaMapper: JavaMapperType): vscode.Diagnostic[] => {
+    const byName = new Map<string, JavaMethodType[]>();
+    for (const method of javaMapper.methods) {
+      const list = byName.get(method.name) ?? [];
+      list.push(method);
+      byName.set(method.name, list);
+    }
+    const diagnostics: vscode.Diagnostic[] = [];
+    for (const sameName of byName.values()) {
+      if (sameName.length < 2) {
+        continue;
+      }
+      for (const method of sameName) {
+        diagnostics.push(buildDiagnostic(
+          lineRange(document, { "line": method.line, "column": 0 }),
+          `Overloaded mapper method '${method.name}()': MyBatis maps statements by method name and cannot distinguish overloads.`,
+          `mybatis-overloaded-method`,
+        ));
+      }
+    }
+    return diagnostics;
   };
 
   // 2-2. 중복 id 그룹 수집 헬퍼
@@ -182,6 +217,28 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
     return diagnostics;
   };
 
+  // 2-5-2. update/delete 필터 누락 진단 (WHERE 없이 전체 행 변경 위험)
+  const buildMissingWhereDiagnostics = (document: vscode.TextDocument, xmlMapper: XmlMapperType): vscode.Diagnostic[] => xmlMapper.statements.filter((statement) => (statement.tag === `update` || statement.tag === `delete`) && !statement.hasWhere).map((statement) => buildDiagnostic(
+    lineRange(document, statement),
+    `MyBatis ${statement.tag} '${statement.id}' has no WHERE clause; it affects every row.`,
+    `mybatis-missing-where`,
+  ));
+
+  // 2-5-3. select 결과 매핑 누락 진단 (resultType/resultMap 둘 다 없음)
+  const buildSelectResultDiagnostics = (document: vscode.TextDocument, xmlMapper: XmlMapperType): vscode.Diagnostic[] => xmlMapper.statements.filter((statement) => statement.tag === `select` && !statement.hasResult).map((statement) => buildDiagnostic(
+    lineRange(document, statement),
+    `MyBatis select '${statement.id}' declares neither resultType nor resultMap.`,
+    `mybatis-select-no-result`,
+  ));
+
+  // 2-5-4. 이스케이프 누락 '<' 진단 (CDATA 밖 비교 연산자는 XML 파싱 실패 유발)
+  const buildUnescapedLtDiagnostics = (document: vscode.TextDocument): vscode.Diagnostic[] => findUnescapedLt(document.getText()).map((item) => buildDiagnostic(
+    tokenRange(document, item),
+    `Unescaped '<' in mapper XML. Wrap the SQL in <![CDATA[ ... ]]> or write &lt;.`,
+    `mybatis-unescaped-lt`,
+    vscode.DiagnosticSeverity.Error,
+  ));
+
   // 2-6. namespace 불일치 진단 (동일 interface명이 다른 패키지에 있고, 그 후보가 아직
   // 자기 XML mapper를 갖지 않을 때만 — 이미 짝이 맞은 후보/XML 전용 mapper 오탐 방지)
   const buildNamespaceDiagnostics = (document: vscode.TextDocument, xmlMapper: XmlMapperType): vscode.Diagnostic[] => {
@@ -212,9 +269,12 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
       collection.delete(document.uri);
       return;
     }
-    const diagnostics = buildMissingDiagnostics(document, javaMapper, xmlMappers);
-    collection.set(document.uri, diagnostics);
-    logger(`debug`, `diagnostic - ${diagnostics.length} missing statements in ${document.uri.fsPath}`);
+    const diagnostics = [
+      ...buildMissingDiagnostics(document, javaMapper, xmlMappers),
+      ...buildOverloadedDiagnostics(document, javaMapper),
+    ];
+    collection.set(document.uri, filterEnabled(diagnostics));
+    logger(`debug`, `diagnostic - ${diagnostics.length} java issues in ${document.uri.fsPath}`);
   };
 
   // 3-1. XML/Java 문서 진단 라우팅
@@ -241,6 +301,9 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
       ...buildDuplicateDiagnostics(target, xmlMapper),
       ...buildReferenceDiagnostics(target, xmlMapper),
       ...buildTestExprDiagnostics(target, xmlMapper),
+      ...buildMissingWhereDiagnostics(target, xmlMapper),
+      ...buildSelectResultDiagnostics(target, xmlMapper),
+      ...buildUnescapedLtDiagnostics(target),
     ];
     const indexed = await indexService.findJavaByNamespace(xmlMapper.namespace);
     if (target.isClosed || target.version !== startVersion) {
@@ -253,7 +316,7 @@ export const MapperDiagnosticProvider = (indexService: MapperIndexServiceType) =
     else {
       diagnostics.push(...buildNamespaceDiagnostics(target, xmlMapper));
     }
-    collection.set(target.uri, diagnostics);
+    collection.set(target.uri, filterEnabled(diagnostics));
     logger(`debug`, `diagnostic - ${diagnostics.length} issues in ${target.uri.fsPath}`);
   };
 

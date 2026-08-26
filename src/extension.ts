@@ -2,7 +2,7 @@
 
 import { MybatisCommand } from "@exportCommands";
 import { vscode } from "@exportLibs";
-import { MapperDiagnosticProvider, MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
+import { MapperCodeActionProvider, MapperDiagnosticProvider, MapperLanguageProvider, MapperLensProvider, SqlDecorationProvider } from "@exportProviders";
 import { initLogger, logger, notify } from "@exportScripts";
 import { MapperIndexService, SqlLogService } from "@exportServices";
 import type { MapperDiagnosticProviderType, MapperIndexServiceType, MapperLensProviderType, SqlDecoProviderType } from "@exportTypes";
@@ -30,6 +30,7 @@ export const activate = (context: vscode.ExtensionContext) => {
   const lensProvider = MapperLensProvider(indexService);
   const languageProvider = MapperLanguageProvider(indexService);
   const diagnosticProvider = MapperDiagnosticProvider(indexService);
+  const codeActionProvider = MapperCodeActionProvider(indexService);
   const decoProvider = SqlDecorationProvider(indexService);
   const commandManager = MybatisCommand(indexService, logService, lensProvider, diagnosticProvider, decoProvider);
 
@@ -43,6 +44,8 @@ export const activate = (context: vscode.ExtensionContext) => {
     vscode.languages.registerHoverProvider({ "language": `xml` }, languageProvider.hoverProvider),
     vscode.languages.registerCompletionItemProvider({ "language": `xml` }, languageProvider.completionProvider, `"`, `'`, `{`),
     vscode.languages.registerDocumentSymbolProvider({ "language": `xml` }, languageProvider.symbolProvider),
+    vscode.languages.registerCodeActionsProvider({ "language": `java` }, codeActionProvider.codeActionProvider, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
+    vscode.languages.registerCodeActionsProvider({ "language": `xml` }, codeActionProvider.codeActionProvider, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
   ];
   const watcher = indexService.watch(() => {
     lensProvider.refresh();

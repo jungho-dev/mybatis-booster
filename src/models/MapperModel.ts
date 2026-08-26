@@ -1,6 +1,6 @@
 // models/MapperModel.ts
 
-import type { JavaCallSiteType, JavaMapperType, JavaMethodType, LogStatementRefType, StatementTagType, XmlBindingType, XmlMapperType, XmlNamedElementType, XmlReferenceType, XmlStatementType, XmlTestExprType } from "@exportTypes";
+import type { JavaCallSiteType, JavaMapperType, JavaMethodType, LogStatementRefType, StatementTagType, XmlBindingType, XmlMapperType, XmlNamedElementType, XmlReferenceType, XmlStatementType, XmlTestExprType, XmlUnescapedLtType } from "@exportTypes";
 import { STATEMENT_TAGS } from "@exportTypes";
 
 const NAMESPACE_PATTERN = /<mapper\s[^>]*?namespace\s*=\s*["']([^"']+)["']/;
@@ -19,6 +19,8 @@ const ITEM_ATTR_PATTERN = /\bitem\s*=\s*["']([^"']+)["']/;
 const INDEX_ATTR_PATTERN = /\bindex\s*=\s*["']([^"']+)["']/;
 const COLLECTION_ATTR_PATTERN = /\bcollection\s*=\s*["']([^"']+)["']/;
 const DATABASE_ID_ATTR_PATTERN = /\bdatabaseId\s*=\s*["']([^"']+)["']/;
+const RESULT_ATTR_PATTERN = /\b(?:resultType|resultMap)\s*=/;
+const WHERE_CLAUSE_PATTERN = /<where\b|\bWHERE\b/i;
 const NESTED_SELECT_PATTERN = /<(?:association|collection)\b[^>]*?\bselect\s*=\s*["']([^"']+)["']/g;
 const TYPED_TOKEN_PATTERN = /\([A-Za-z_$][\w$]*\)\s*$/;
 const TEST_ATTR_PATTERN = /<(?:if|when)\b[^>]*?\btest\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
@@ -156,6 +158,10 @@ export const parseXmlMapper = (fsPath: string, text: string): XmlMapperType | nu
     const openTag = scanText.slice(raw.index, bodyStart);
     const bodyEndSafe = Math.max(bodyStart, bodyEnd);
     const statementVars = collectStatementVars(scanText, bodyStart, bodyEndSafe, lineStarts);
+    // select 결과 매핑 보유 여부 (resultType/resultMap 속성)
+    const hasResult = RESULT_ATTR_PATTERN.test(openTag);
+    // update/delete 필터 보유 여부 (정적 WHERE 또는 <where> 동적 절)
+    const hasWhere = WHERE_CLAUSE_PATTERN.test(scanText.slice(bodyStart, bodyEndSafe));
     statements.push({
       "id": raw.id,
       "tag": raw.tag,
@@ -163,6 +169,8 @@ export const parseXmlMapper = (fsPath: string, text: string): XmlMapperType | nu
       // 커서 위치가 이 statement 소유인지 판정하기 위한 종료 라인 (닫는 태그 라인)
       "endLine": offsetToPosition(lineStarts, Math.max(raw.index, bodyEndSafe)).line,
       "databaseId": DATABASE_ID_ATTR_PATTERN.exec(openTag)?.[1] ?? ``,
+      hasResult,
+      hasWhere,
       "bindings": collectBindings(scanText, bodyStart, bodyEndSafe, lineStarts),
       "collections": statementVars.collections,
       "localVars": statementVars.localVars,
@@ -689,4 +697,100 @@ export const findLogStatementRef = (logText: string): LogStatementRefType | unde
     last = { "simpleName": match[1], "methodId": match[2] };
   }
   return last;
+};
+
+// 5-1. CDATA 구간 공백 치환 (오프셋 좌표 유지, 내부 '<' 오탐 방지)
+const blankCdataSections = (text: string): string => text.replace(new RegExp(CDATA_PATTERN.source, `g`), (whole) => ` `.repeat(whole.length));
+
+// 5-2. 이스케이프 누락 '<' 위치 수집 (본문의 비교 연산자 '<' 는 XML 파서가 거부)
+// - 태그 시작 '<' 은 다음 문자가 letter/'/'/'!'/'?' 이므로 제외
+// - 주석/CDATA 는 공백 치환 후 스캔
+export const findUnescapedLt = (text: string): XmlUnescapedLtType[] => {
+  const scanText = blankCdataSections(blankXmlComments(text));
+  const lineStarts = buildLineStarts(text);
+  const results: XmlUnescapedLtType[] = [];
+  for (let i = 0; i < scanText.length; i++) {
+    if (scanText[i] !== `<`) {
+      continue;
+    }
+    const next = scanText[i + 1];
+    if (next !== undefined && /[A-Za-z/!?]/.test(next)) {
+      continue;
+    }
+    results.push({
+      "length": next === `=` ? 2 : 1,
+      ...offsetToPosition(lineStarts, i),
+    });
+  }
+  return results;
+};
+
+// 6-0. 로그 변환 상수 (Preparing/Parameters 마커, 숫자형 래퍼 타입)
+const LOG_PREPARING = `Preparing:`;
+const LOG_PARAMETERS = `Parameters:`;
+const LOG_NUMERIC_TYPES = new Set([`Integer`, `Long`, `Short`, `Byte`, `Double`, `Float`, `BigDecimal`, `BigInteger`, `Boolean`]);
+
+// 6-1. 로그 파라미터 토큰 -> SQL 리터럴 (숫자형은 원값, 그 외 따옴표, null 은 NULL)
+const logToLiteral = (token: string): string => {
+  const trimmed = token.trim();
+  if (!trimmed || trimmed === `null`) {
+    return `NULL`;
+  }
+  const typeStart = trimmed.lastIndexOf(`(`);
+  const hasType = typeStart > -1 && trimmed.endsWith(`)`);
+  const value = hasType ? trimmed.slice(0, typeStart).trim() : trimmed;
+  const type = hasType ? trimmed.slice(typeStart + 1, -1).trim() : ``;
+  return LOG_NUMERIC_TYPES.has(type) ? value : `'${value.replaceAll(`'`, `''`)}'`;
+};
+
+// 6-2. '?' 플레이스홀더 순차 바인딩 (문자열 리터럴 내부 '?' 는 건너뜀)
+const bindLogParameters = (sql: string, tokens: string[]): string => {
+  let bound = ``;
+  let tokenIndex = 0;
+  let inString = false;
+  for (const char of sql) {
+    if (char === `'`) {
+      inString = !inString;
+      bound += char;
+      continue;
+    }
+    if (char === `?` && !inString) {
+      const token = tokens[tokenIndex];
+      tokenIndex += 1;
+      bound += token === undefined ? `?` : logToLiteral(token);
+      continue;
+    }
+    bound += char;
+  }
+  return bound;
+};
+
+// 6-3. MyBatis 로그 -> SQL 변환 (Preparing/Parameters 쌍마다 처리, 다중 statement 지원)
+export const convertMybatisLog = (logText: string): string | null => {
+  const lines = logText.split(/\r?\n/);
+  const results: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const prepIndex = lines[i].indexOf(LOG_PREPARING);
+    if (prepIndex < 0) {
+      continue;
+    }
+    let sql = lines[i].slice(prepIndex + LOG_PREPARING.length).trim();
+    // 다음 Preparing 이전의 첫 Parameters 라인만 이 statement 바인딩으로 사용
+    let params: string | undefined;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].includes(LOG_PREPARING)) {
+        break;
+      }
+      const paramIndex = lines[j].indexOf(LOG_PARAMETERS);
+      if (paramIndex >= 0) {
+        params = lines[j].slice(paramIndex + LOG_PARAMETERS.length).trim();
+        break;
+      }
+    }
+    if (params) {
+      sql = bindLogParameters(sql, splitLogParamTokens(params));
+    }
+    results.push(sql);
+  }
+  return results.length > 0 ? results.join(`;\n\n`) : null;
 };
